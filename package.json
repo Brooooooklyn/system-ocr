@@ -16,7 +16,10 @@
     "N-API",
     "Rust",
     "node-addon",
-    "node-addon-api"
+    "node-addon-api",
+    "ocr",
+    "visionkit",
+    "media-ocr"
   ],
   "files": [
     "index.d.ts",
