@@ -1,14 +1,7 @@
-use std::mem;
-
-use napi::{
-  Either, Env,
-  bindgen_prelude::{AbortSignal, AsyncTask, Result, Task, Uint8Array},
-};
-use napi_derive::napi;
+use napi::bindgen_prelude::{Either, Uint8Array};
 use objc2_vision::VNRequestTextRecognitionLevel;
-use thiserror::Error;
 
-use crate::OcrAccuracy;
+use crate::{OcrAccuracy, OcrError};
 
 impl From<OcrAccuracy> for VNRequestTextRecognitionLevel {
   fn from(value: OcrAccuracy) -> Self {
@@ -19,77 +12,7 @@ impl From<OcrAccuracy> for VNRequestTextRecognitionLevel {
   }
 }
 
-#[derive(Error, Debug)]
-pub enum OcrError {
-  #[error("Failed to allocate VNRecognizeTextRequest")]
-  VNRecognizeTextRequest,
-  #[error("Failed to initialize VNRecognizeTextRequest")]
-  VNRecognizeTextRequestInit,
-  #[error("No text recognized")]
-  NoTextRecognized,
-  #[error("Unknown Vision error")]
-  UnknownVisionError,
-  #[error("Error {0}")]
-  ErrorWithDesc(String),
-  #[error("Failed to get localized description")]
-  LocalizedDescription,
-  #[error("Failed to get string from first object")]
-  StringFromFirstObject,
-}
-
-#[napi(object)]
-pub struct OcrResult {
-  pub text: String,
-  pub confidence: f64,
-}
-
-pub struct RecognizeTask {
-  image: Either<String, Uint8Array>,
-  accuracy: OcrAccuracy,
-  prefered_langs: Option<Vec<String>>,
-}
-
-#[napi]
-impl Task for RecognizeTask {
-  type Output = OcrResult;
-  type JsValue = OcrResult;
-
-  fn compute(&mut self) -> Result<Self::Output> {
-    let (text, confidence) = perform_ocr(
-      mem::replace(&mut self.image, Either::A(String::new())),
-      self.accuracy,
-      self.prefered_langs.take().unwrap_or_default(),
-    )
-    .map_err(anyhow::Error::from)?;
-    Ok(OcrResult {
-      text,
-      confidence: confidence as f64,
-    })
-  }
-
-  fn resolve(&mut self, _: Env, output: Self::Output) -> Result<Self::JsValue> {
-    Ok(output)
-  }
-}
-
-#[napi]
-pub fn recognize(
-  image: Either<String, Uint8Array>,
-  accuracy: OcrAccuracy,
-  prefered_langs: Option<Vec<String>>,
-  signal: Option<AbortSignal>,
-) -> AsyncTask<RecognizeTask> {
-  AsyncTask::with_optional_signal(
-    RecognizeTask {
-      image,
-      accuracy,
-      prefered_langs,
-    },
-    signal,
-  )
-}
-
-fn perform_ocr(
+pub(crate) fn perform_ocr(
   mut image: Either<String, Uint8Array>,
   accuracy: OcrAccuracy,
   preferred_langs: Vec<String>,

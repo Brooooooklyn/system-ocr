@@ -7,7 +7,14 @@ export declare const enum OcrAccuracy {
 
 export interface OcrResult {
   text: string
+  /** always 1.0 on Windows */
   confidence: number
 }
 
-export declare function recognize(image: string | Uint8Array, accuracy: OcrAccuracy, preferedLangs?: Array<string> | undefined | null, signal?: AbortSignal | undefined | null): Promise<OcrResult>
+/**
+ * @param image - The image file path or Buffer
+ * @param accuracy - The accuracy of the OCR. Default is `Accurate`. Ignored on Windows.
+ * @param preferredLangs - The preferred languages for the OCR. Default is `["en-US"]`. On Windows, only the first language is used.
+ * @param signal - The signal to abort the OCR.
+ */
+export declare function recognize(image: string | Uint8Array, accuracy?: OcrAccuracy | undefined | null, preferredLangs?: Array<string> | undefined | null, signal?: AbortSignal | undefined | null): Promise<OcrResult>
