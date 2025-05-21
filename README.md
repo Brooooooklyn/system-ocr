@@ -40,3 +40,10 @@ const image = await fetch('https://example.com/image.png')
 
 const result = await recognize(image, OcrAccuracy.Accurate, ['fr', 'zh-cn'])
 ```
+
+## Credits
+
+Huge thanks to:
+
+- [win-ocr-rs](https://github.com/JichouP/win-ocr-rs)
+- [mac-system-ocr](https://github.com/DeJeune/mac-system-ocr)
