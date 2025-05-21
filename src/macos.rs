@@ -109,10 +109,12 @@ pub(crate) fn perform_ocr(
           // Determine whether to insert space or newline depending on bounding box.
           let bbox: CGRect = result.boundingBox();
           if !rust_str.is_empty() {
-            if bbox.origin.y < 0.1 {
-              collected_text.push('\n');
-            } else {
-              collected_text.push(' ');
+            if !collected_text.is_empty() {
+              if bbox.origin.y < 0.1 {
+                collected_text.push('\n');
+              } else {
+                collected_text.push(' ');
+              }
             }
             collected_text.push_str(rust_str);
           }
