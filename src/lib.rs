@@ -2,7 +2,15 @@
 
 use napi_derive::napi;
 
+#[cfg(target_os = "macos")]
+mod macos;
+
+#[cfg(target_os = "macos")]
+pub use macos::*;
+
 #[napi]
-pub fn plus_100(input: u32) -> u32 {
-  input + 100
+#[derive(Debug, Clone, Copy)]
+pub enum OcrAccuracy {
+  Fast,
+  Accurate,
 }
