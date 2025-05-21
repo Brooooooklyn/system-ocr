@@ -35,8 +35,8 @@ if (!image) {
         value: 'math.png',
       },
       {
-        name: 'large',
-        value: 'large.png',
+        name: 'zh',
+        value: 'zh.png',
       },
     ],
   })
