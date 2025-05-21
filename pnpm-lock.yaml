@@ -41,9 +41,6 @@ importers:
       prettier:
         specifier: ^3.5.2
         version: 3.5.2
-      tinybench:
-        specifier: ^4.0.0
-        version: 4.0.1
       typescript:
         specifier: ^5.7.3
         version: 5.7.3
@@ -1495,10 +1492,6 @@ packages:
     resolution: {integrity: sha512-TIsDdtKo6+XrPtiTm1ssmMngN1sAhyKnTO2kunQWqNPWIVvCm15Wmw4SWInwTVgJ5u/Tr04+8Ei9TNcw4x4ONA==}
     engines: {node: '>=4'}
 
-  tinybench@4.0.1:
-    resolution: {integrity: sha512-Nb1srn7dvzkVx0J5h1vq8f48e3TIcbrS7e/UfAI/cDSef/n8yLh4zsAEsFkfpw6auTY+ZaspEvam/xs8nMnotQ==}
-    engines: {node: '>=18.0.0'}
-
   tmp@0.0.33:
     resolution: {integrity: sha512-jRCJlojKnZ3addtTOjdIqoRuPEKBvNXcGYqzO6zWZX8KfKEpnGY5jfggJQ3EjKuu8D4bJRr0y+cYJFmYbImXGw==}
     engines: {node: '>=0.6.0'}
@@ -2913,8 +2906,6 @@ snapshots:
   temp-dir@3.0.0: {}
 
   time-zone@1.0.0: {}
-
-  tinybench@4.0.1: {}
 
   tmp@0.0.33:
     dependencies:
