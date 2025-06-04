@@ -57,7 +57,7 @@
   },
   "devDependencies": {
     "@inquirer/prompts": "^7.5.1",
-    "@napi-rs/cli": "3.0.0-alpha.81",
+    "@napi-rs/cli": "3.0.0-alpha.84",
     "@oxc-node/core": "^0.0.27",
     "@taplo/cli": "^0.7.0",
     "@types/node": "^22.15.21",
