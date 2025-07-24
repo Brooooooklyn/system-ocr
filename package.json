@@ -33,6 +33,7 @@
       "x86_64-pc-windows-msvc",
       "aarch64-pc-windows-msvc"
     ],
+    "constEnum": false,
     "packageName": "@napi-rs/system-ocr"
   },
   "engines": {
