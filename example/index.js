@@ -52,4 +52,3 @@ if (!image) {
 const result = await recognize(imagePath, accuracy, preferredLangs)
 
 console.log(result)
-
