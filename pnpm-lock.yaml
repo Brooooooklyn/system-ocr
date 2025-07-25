@@ -12,8 +12,8 @@ importers:
         specifier: ^7.7.1
         version: 7.7.1(@types/node@24.1.0)
       '@napi-rs/cli':
-        specifier: 3.0.3
-        version: 3.0.3(@emnapi/runtime@1.4.5)(@types/node@24.1.0)(emnapi@1.3.1)
+        specifier: 3.0.4
+        version: 3.0.4(@emnapi/runtime@1.4.5)(@types/node@24.1.0)(emnapi@1.3.1)
       '@oxc-node/core':
         specifier: ^0.0.30
         version: 0.0.30
@@ -193,8 +193,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  '@napi-rs/cli@3.0.3':
-    resolution: {integrity: sha512-5PxtOcax9PoOriYWYf8BFNgOzUnsogYUDRM8p2leT2VtG/NTMZCyoRQMzSMB0qEaw+Durkefc5jXCpEF6wrWbA==}
+  '@napi-rs/cli@3.0.4':
+    resolution: {integrity: sha512-ilbCI69DVDQcIUSUB504LM1+Nhvo0jKycWAzzPJ22YwUoWrru/w0+V5sfjPINgkshQ4Ykv+oZOJXk9Kg1ZBUvg==}
     engines: {node: '>= 16'}
     hasBin: true
     peerDependencies:
@@ -1534,9 +1534,6 @@ packages:
   universal-user-agent@7.0.2:
     resolution: {integrity: sha512-0JCqzSKnStlRRQfCdowvqy3cy0Dvtlb8xecj/H8JFZuCze4rwjPZQOgvFvn0Ws/usCHQFGpyr+pB9adaGwXn4Q==}
 
-  wasm-sjlj@1.0.6:
-    resolution: {integrity: sha512-pjaKtLJejlWm6+okPV2X1A6nIsRDD4qeK97eCh8DP8KXi3Nzn/HY01vpHhZHlhDri12eZqipjm8HhdTVw+ATxw==}
-
   webidl-conversions@3.0.1:
     resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
 
@@ -1766,7 +1763,7 @@ snapshots:
       - encoding
       - supports-color
 
-  '@napi-rs/cli@3.0.3(@emnapi/runtime@1.4.5)(@types/node@24.1.0)(emnapi@1.3.1)':
+  '@napi-rs/cli@3.0.4(@emnapi/runtime@1.4.5)(@types/node@24.1.0)(emnapi@1.3.1)':
     dependencies:
       '@inquirer/prompts': 7.7.1(@types/node@24.1.0)
       '@napi-rs/cross-toolchain': 1.0.0
@@ -1780,7 +1777,6 @@ snapshots:
       lodash-es: 4.17.21
       semver: 7.7.1
       typanion: 3.14.0
-      wasm-sjlj: 1.0.6
     optionalDependencies:
       '@emnapi/runtime': 1.4.5
       emnapi: 1.3.1
@@ -2919,8 +2915,6 @@ snapshots:
   unicorn-magic@0.3.0: {}
 
   universal-user-agent@7.0.2: {}
-
-  wasm-sjlj@1.0.6: {}
 
   webidl-conversions@3.0.1: {}
 
