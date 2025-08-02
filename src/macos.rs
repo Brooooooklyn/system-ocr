@@ -40,10 +40,11 @@ pub(crate) fn perform_ocr(
         }
         Either::B(image) => {
           let data = image.as_mut();
-          let ns_data = NSData::initWithBytesNoCopy_length(
+          let ns_data = NSData::initWithBytesNoCopy_length_freeWhenDone(
             NSData::alloc(),
             std::ptr::NonNull::new_unchecked(data.as_mut_ptr().cast()),
             data.len(),
+            false,
           );
           VNImageRequestHandler::initWithData_options(
             VNImageRequestHandler::alloc(),
