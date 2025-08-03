@@ -186,6 +186,9 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # Update npm to latest version to ensure it's support Trusted publishing
+      - name: Update npm
+        run: npm install -g npm@latest
       - name: Install dependencies
         run: pnpm install
       - name: Download all artifacts
@@ -201,18 +204,14 @@ jobs:
         shell: bash
       - name: Publish
         run: |
-          npm config set provenance true
           if git log -1 --pretty=%B | grep "^v\?[0-9]\+\.[0-9]\+\.[0-9]\+$";
           then
-            echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
             npm publish --access public
           elif git log -1 --pretty=%B | grep "^v\?[0-9]\+\.[0-9]\+\.[0-9]\+";
           then
-            echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
             npm publish --tag next --access public
           else
             echo "Not a release, skipping publish"
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
