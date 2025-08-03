@@ -1,6 +1,6 @@
 {
   "name": "@napi-rs/system-ocr",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "OCR via system provided API",
   "main": "index.js",
   "types": "index.d.ts",
