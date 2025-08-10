@@ -12,8 +12,8 @@ importers:
         specifier: ^7.7.1
         version: 7.7.1(@types/node@24.1.0)
       '@napi-rs/cli':
-        specifier: 3.1.2
-        version: 3.1.2(@emnapi/runtime@1.4.5)(@types/node@24.1.0)(emnapi@1.3.1)
+        specifier: 3.1.3
+        version: 3.1.3(@emnapi/runtime@1.4.5)(@types/node@24.1.0)(emnapi@1.3.1)
       '@oxc-node/core':
         specifier: ^0.0.32
         version: 0.0.32
@@ -193,8 +193,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  '@napi-rs/cli@3.1.2':
-    resolution: {integrity: sha512-i0HT3Ja83Bzy+OtLd2eG7MI6E83+z/iwwzrdCjJ3ZiSpT3uE/xpVrLuZPd3MT5dJ9LAxCPN+P0tAPF32pRErUg==}
+  '@napi-rs/cli@3.1.3':
+    resolution: {integrity: sha512-4FOnH3cLPPKaFbngu5K5frlhpPwss3JHhHcwMA/zMWHYSe5krCFiYc0itxLfU2cI//Y0AjIloC+LzoPewBUx1g==}
     engines: {node: '>= 16'}
     hasBin: true
     peerDependencies:
@@ -432,9 +432,6 @@ packages:
   '@napi-rs/tar@1.0.0':
     resolution: {integrity: sha512-4sE8bFyOQFKcjWwBoBMtB+YIgKTqQFOFQZWKJP54jENpFulw8cieBaYoA3bbKCCFxXl2jCFulFKDtDErPWULTg==}
     engines: {node: '>= 10'}
-
-  '@napi-rs/wasm-runtime@1.0.1':
-    resolution: {integrity: sha512-KVlQ/jgywZpixGCKMNwxStmmbYEMyokZpCf2YuIChhfJA2uqfAKNEM8INz7zzTo55iEXfBhIIs3VqYyqzDLj8g==}
 
   '@napi-rs/wasm-runtime@1.0.3':
     resolution: {integrity: sha512-rZxtMsLwjdXkMUGC3WwsPwLNVqVqnTJT6MNIB6e+5fhMcSCPP0AOsNWuMQ5mdCq6HNjs/ZeWAEchpqeprqBD2Q==}
@@ -979,6 +976,9 @@ packages:
     resolution: {integrity: sha512-xUtoPkMggbz0MPyPiIWr1Kp4aeWJjDZ6SMvURhimjdZgsRuDplF5/s9hcgGhyXMhs+6vpnuoiZ2kFiu3FMnS8Q==}
     engines: {node: '>=18'}
 
+  es-toolkit@1.39.9:
+    resolution: {integrity: sha512-9OtbkZmTA2Qc9groyA1PUNeb6knVTkvB2RSdr/LcJXDL8IdEakaxwXLHXa7VX/Wj0GmdMJPR3WhnPGhiP3E+qg==}
+
   escalade@3.1.1:
     resolution: {integrity: sha512-k0er2gUkLf8O0zKJiAhmkTnJlTvINGv7ygDNPbeIsX/TJjGJZHuh9B2UxbsaEkmlEo9MfhrSzmhIlhRlI2GXnw==}
     engines: {node: '>=6'}
@@ -1183,9 +1183,6 @@ packages:
   locate-path@7.2.0:
     resolution: {integrity: sha512-gvVijfZvn7R+2qyPX8mAuKcFGDf6Nc61GdvGafQsHL0sBIxfKzA+usWn4GFC/bk+QdwPUD4kWFJLhElipq+0VA==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
-
-  lodash-es@4.17.21:
-    resolution: {integrity: sha512-mKnC+QJ9pWVzv+C4/U3rRsHapFfHvQFoFB92e52xeyGMcX6/OlIl78je1u8vePzYZSkkogMPJ2yjxxsb89cxyw==}
 
   lodash@4.17.21:
     resolution: {integrity: sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg==}
@@ -1766,7 +1763,7 @@ snapshots:
       - encoding
       - supports-color
 
-  '@napi-rs/cli@3.1.2(@emnapi/runtime@1.4.5)(@types/node@24.1.0)(emnapi@1.3.1)':
+  '@napi-rs/cli@3.1.3(@emnapi/runtime@1.4.5)(@types/node@24.1.0)(emnapi@1.3.1)':
     dependencies:
       '@inquirer/prompts': 7.7.1(@types/node@24.1.0)
       '@napi-rs/cross-toolchain': 1.0.0
@@ -1775,9 +1772,9 @@ snapshots:
       clipanion: 4.0.0-rc.4(typanion@3.14.0)
       colorette: 2.0.20
       debug: 4.4.1
+      es-toolkit: 1.39.9
       find-up: 7.0.0
       js-yaml: 4.1.0
-      lodash-es: 4.17.21
       semver: 7.7.1
       typanion: 3.14.0
     optionalDependencies:
@@ -1842,7 +1839,7 @@ snapshots:
 
   '@napi-rs/lzma-wasm32-wasi@1.4.4':
     dependencies:
-      '@napi-rs/wasm-runtime': 1.0.1
+      '@napi-rs/wasm-runtime': 1.0.3
     optional: true
 
   '@napi-rs/lzma-win32-arm64-msvc@1.4.4':
@@ -1912,7 +1909,7 @@ snapshots:
 
   '@napi-rs/tar-wasm32-wasi@1.0.0':
     dependencies:
-      '@napi-rs/wasm-runtime': 1.0.1
+      '@napi-rs/wasm-runtime': 1.0.3
     optional: true
 
   '@napi-rs/tar-win32-arm64-msvc@1.0.0':
@@ -1942,13 +1939,6 @@ snapshots:
       '@napi-rs/tar-win32-arm64-msvc': 1.0.0
       '@napi-rs/tar-win32-ia32-msvc': 1.0.0
       '@napi-rs/tar-win32-x64-msvc': 1.0.0
-
-  '@napi-rs/wasm-runtime@1.0.1':
-    dependencies:
-      '@emnapi/core': 1.4.5
-      '@emnapi/runtime': 1.4.5
-      '@tybys/wasm-util': 0.10.0
-    optional: true
 
   '@napi-rs/wasm-runtime@1.0.3':
     dependencies:
@@ -1986,7 +1976,7 @@ snapshots:
 
   '@napi-rs/wasm-tools-wasm32-wasi@1.0.0':
     dependencies:
-      '@napi-rs/wasm-runtime': 1.0.1
+      '@napi-rs/wasm-runtime': 1.0.3
     optional: true
 
   '@napi-rs/wasm-tools-win32-arm64-msvc@1.0.0':
@@ -2446,6 +2436,8 @@ snapshots:
 
   environment@1.1.0: {}
 
+  es-toolkit@1.39.9: {}
+
   escalade@3.1.1: {}
 
   escape-string-regexp@2.0.0: {}
@@ -2632,8 +2624,6 @@ snapshots:
   locate-path@7.2.0:
     dependencies:
       p-locate: 6.0.0
-
-  lodash-es@4.17.21: {}
 
   lodash@4.17.21: {}
 
