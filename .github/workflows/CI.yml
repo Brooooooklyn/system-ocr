@@ -25,7 +25,7 @@ jobs:
     name: Lint
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: setup pnpm
         uses: pnpm/action-setup@v4
       - name: Setup node
@@ -71,7 +71,7 @@ jobs:
     name: stable - ${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: setup pnpm
         uses: pnpm/action-setup@v4
       - name: Setup node
@@ -147,7 +147,7 @@ jobs:
           - '22'
     runs-on: ${{ matrix.settings.host }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: setup pnpm
         uses: pnpm/action-setup@v4
       - name: Setup node
@@ -178,7 +178,7 @@ jobs:
       - lint
       - test-macOS-windows-binding
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: setup pnpm
         uses: pnpm/action-setup@v4
       - name: Setup node
