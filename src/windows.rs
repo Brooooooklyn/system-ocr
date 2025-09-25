@@ -65,13 +65,15 @@ pub fn open_image_as_bitmap(image: Either<String, Uint8Array>) -> Result<Softwar
         }
       };
 
-      let file = block_on(async { StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.await })?;
+      let file =
+        block_on(async { StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.await })?;
 
       let bitmap = block_on(async {
         BitmapDecoder::CreateWithIdAsync(
           BitmapDecoder::PngDecoderId()?,
           &file.OpenAsync(FileAccessMode::Read)?.await?,
-        )?.await
+        )?
+        .await
       })?;
 
       block_on(async { bitmap.GetSoftwareBitmapAsync()?.await })
@@ -105,7 +107,8 @@ pub fn open_image_as_bitmap(image: Either<String, Uint8Array>) -> Result<Softwar
       writer.StoreAsync()?; // flush buffer
       writer.FlushAsync()?;
       stream.Seek(0)?;
-      let bitmap = block_on(async { BitmapDecoder::CreateWithIdAsync(bitmap_decoder_id, &stream)?.await })?;
+      let bitmap =
+        block_on(async { BitmapDecoder::CreateWithIdAsync(bitmap_decoder_id, &stream)?.await })?;
 
       block_on(async { bitmap.GetSoftwareBitmapAsync()?.await })
     }
