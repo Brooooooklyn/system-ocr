@@ -1,5 +1,7 @@
 use std::fs;
 
+#[cfg(target_os = "windows")]
+use futures::executor::block_on;
 use napi::bindgen_prelude::{Either, Uint8Array};
 use windows::{
   Globalization::Language,
@@ -44,9 +46,7 @@ pub(crate) fn perform_ocr_win(
     OcrEngine::TryCreateFromUserProfileLanguages()?
   };
 
-  let result = engine
-    .RecognizeAsync(&bitmap)?
-    .get()?
+  let result = block_on(async { engine.RecognizeAsync(&bitmap)?.await })?
     .Text()?
     .to_string_lossy();
 
@@ -65,15 +65,18 @@ pub fn open_image_as_bitmap(image: Either<String, Uint8Array>) -> Result<Softwar
         }
       };
 
-      let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.get()?;
+      let file =
+        block_on(async { StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.await })?;
 
-      let bitmap = BitmapDecoder::CreateWithIdAsync(
-        BitmapDecoder::PngDecoderId()?,
-        &file.OpenAsync(FileAccessMode::Read)?.get()?,
-      )?
-      .get()?;
+      let bitmap = block_on(async {
+        BitmapDecoder::CreateWithIdAsync(
+          BitmapDecoder::PngDecoderId()?,
+          &file.OpenAsync(FileAccessMode::Read)?.await?,
+        )?
+        .await
+      })?;
 
-      bitmap.GetSoftwareBitmapAsync()?.get()
+      block_on(async { bitmap.GetSoftwareBitmapAsync()?.await })
     }
     Either::B(buffer) => {
       let image_buffer = buffer.as_ref();
@@ -104,9 +107,10 @@ pub fn open_image_as_bitmap(image: Either<String, Uint8Array>) -> Result<Softwar
       writer.StoreAsync()?; // flush buffer
       writer.FlushAsync()?;
       stream.Seek(0)?;
-      let bitmap = BitmapDecoder::CreateWithIdAsync(bitmap_decoder_id, &stream)?.get()?;
+      let bitmap =
+        block_on(async { BitmapDecoder::CreateWithIdAsync(bitmap_decoder_id, &stream)?.await })?;
 
-      bitmap.GetSoftwareBitmapAsync()?.get()
+      block_on(async { bitmap.GetSoftwareBitmapAsync()?.await })
     }
   }
 }
