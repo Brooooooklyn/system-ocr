@@ -12,8 +12,8 @@ importers:
         specifier: ^7.7.1
         version: 7.7.1(@types/node@24.1.0)
       '@napi-rs/cli':
-        specifier: 3.3.0
-        version: 3.3.0(@types/node@24.1.0)
+        specifier: 3.3.1
+        version: 3.3.1(@types/node@24.1.0)
       '@oxc-node/core':
         specifier: ^0.0.32
         version: 0.0.32
@@ -314,8 +314,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  '@napi-rs/cli@3.3.0':
-    resolution: {integrity: sha512-ff2fG6Y4ro4M4YOeDTonUrGPGG+96BfLLGvKGa6WNuXBtWGO0/20rG11mpwsFMwwO8xM7q0QZl3e2BvdedUABw==}
+  '@napi-rs/cli@3.3.1':
+    resolution: {integrity: sha512-KVO9tLhtOtDc8iMUJYRkj6WZcYmV6+fhXbLa1Qstrm6ZQa9McIsqjFH7PLx3BnEWwejjJrenrCX5JENwl0MpKg==}
     engines: {node: '>= 16'}
     hasBin: true
     peerDependencies:
@@ -1990,13 +1990,13 @@ snapshots:
       https-proxy-agent: 7.0.6
       node-fetch: 2.7.0
       nopt: 8.1.0
-      semver: 7.7.1
+      semver: 7.7.2
       tar: 7.4.3
     transitivePeerDependencies:
       - encoding
       - supports-color
 
-  '@napi-rs/cli@3.3.0(@types/node@24.1.0)':
+  '@napi-rs/cli@3.3.1(@types/node@24.1.0)':
     dependencies:
       '@inquirer/prompts': 7.8.6(@types/node@24.1.0)
       '@napi-rs/cross-toolchain': 1.0.3
