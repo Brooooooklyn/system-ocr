@@ -58,7 +58,7 @@
   },
   "devDependencies": {
     "@inquirer/prompts": "^7.7.1",
-    "@napi-rs/cli": "3.3.0",
+    "@napi-rs/cli": "3.4.1",
     "@oxc-node/core": "^0.0.32",
     "@taplo/cli": "^0.7.0",
     "@types/node": "^24.1.0",
@@ -107,5 +107,5 @@
     "type": "github",
     "url": "https://github.com/sponsors/Brooooooklyn"
   },
-  "packageManager": "pnpm@10.18.2"
+  "packageManager": "pnpm@10.19.0"
 }
