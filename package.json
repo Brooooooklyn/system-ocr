@@ -59,7 +59,7 @@
   "devDependencies": {
     "@inquirer/prompts": "^8.0.0",
     "@napi-rs/cli": "3.6.0",
-    "@oxc-node/core": "^0.0.35",
+    "@oxc-node/core": "^0.1.0",
     "@taplo/cli": "^0.7.0",
     "@types/node": "^24.1.0",
     "ava": "^7.0.0",
