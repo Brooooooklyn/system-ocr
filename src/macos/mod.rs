@@ -3,6 +3,9 @@ use objc2_vision::VNRequestTextRecognitionLevel;
 
 use crate::{OcrAccuracy, OcrError};
 
+#[cfg(has_recognize_documents)]
+mod documents;
+
 impl From<OcrAccuracy> for VNRequestTextRecognitionLevel {
   fn from(value: OcrAccuracy) -> Self {
     match value {
@@ -13,6 +16,23 @@ impl From<OcrAccuracy> for VNRequestTextRecognitionLevel {
 }
 
 pub(crate) fn perform_ocr(
+  mut image: Either<String, Uint8Array>,
+  accuracy: OcrAccuracy,
+  preferred_langs: Vec<String>,
+) -> std::result::Result<(String, f32), OcrError> {
+  // On macOS 26+, prefer RecognizeDocumentsRequest for richer structured output.
+  #[cfg(has_recognize_documents)]
+  {
+    if let Ok(text) = documents::perform_recognize_documents(&mut image) {
+      return Ok((text, 1.0));
+    }
+    // RecognizeDocumentsRequest failed (e.g. runtime < macOS 26), fall through.
+  }
+
+  perform_ocr_legacy(image, accuracy, preferred_langs)
+}
+
+fn perform_ocr_legacy(
   mut image: Either<String, Uint8Array>,
   accuracy: OcrAccuracy,
   preferred_langs: Vec<String>,
