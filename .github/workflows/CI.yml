@@ -84,6 +84,24 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.settings.target }}
+      - name: Select Xcode 26 if available (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # macos-latest currently maps to macOS 15 with Xcode 16.4 selected
+          # by default. Xcode 26 is pre-installed on the runner image but not
+          # selected. Select the newest installed Xcode 26.x so the macOS 26
+          # SDK (RecognizeDocumentsRequest) is visible to swiftc and the
+          # cargo build below.
+          newest="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -n "$newest" ]; then
+            sudo xcode-select -s "$newest/Contents/Developer"
+            echo "Selected $newest"
+          else
+            echo "No Xcode 26 installation found; falling back to runner default"
+          fi
+          echo "DEVELOPER_DIR=$(xcode-select -p)" >> "$GITHUB_ENV"
+          xcrun --sdk macosx --show-sdk-version
       - name: Get Xcode SDK version (macOS)
         id: xcode_sdk
         if: runner.os == 'macOS'
@@ -157,6 +175,14 @@ jobs:
             echo "Not a release commit; sidecar absence is acceptable."
             exit 0
           fi
+          sdk="$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || echo unknown)"
+          case "$sdk" in
+            26.*) ;;
+            *)
+              echo "::error::Release commit on ${{ matrix.settings.target }} but selected macOS SDK is $sdk (need 26.x for RecognizeDocumentsRequest). Upgrade the runner image or select Xcode 26."
+              exit 1
+              ;;
+          esac
           if [ ! -f "librecognize_documents.dylib" ]; then
             echo "::error::Release commit on ${{ matrix.settings.target }} produced no librecognize_documents.dylib. The runner needs macOS 26 SDK (Xcode 26+); upgrade the runner image or pin an Xcode that ships the RecognizeDocumentsRequest SDK."
             exit 1
