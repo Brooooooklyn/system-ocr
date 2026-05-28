@@ -49,12 +49,22 @@ pub(crate) fn perform_ocr(
   #[cfg(has_recognize_documents)]
   {
     if matches!(accuracy, OcrAccuracy::Accurate) && !explicit_langs {
+      // SYSTEM_OCR_REQUIRE_DOCUMENTS=1 makes structured-document failures
+      // hard errors instead of silently falling through to legacy OCR. This
+      // is an internal knob for tests and CI assertions on macOS 26 runners
+      // — it lets a test prove the sidecar path was actually exercised
+      // instead of just observing that some text came back via either path.
+      let strict = std::env::var_os("SYSTEM_OCR_REQUIRE_DOCUMENTS").is_some();
       match documents::perform_recognize_documents(&mut image, &resolved_langs) {
         Ok((text, confidence)) => return Ok((text, confidence)),
+        Err(OcrError::DocumentsSidecarUnavailable) if strict => {
+          return Err(OcrError::DocumentsSidecarUnavailable);
+        }
         Err(OcrError::DocumentsSidecarUnavailable) => {
           // Expected on macOS < 26, missing sidecar dylib, or absent Swift
           // runtime — silently fall through to the legacy path.
         }
+        Err(err) if strict => return Err(err),
         Err(err) => {
           // Sidecar IS loaded but the request failed (Vision regression,
           // unreadable image, etc.). Surface it on stderr so production

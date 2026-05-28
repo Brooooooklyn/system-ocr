@@ -382,17 +382,38 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
   //   (e.g. a paragraph next to a single-line caption). Values in the
   //   0.005–0.02 range all work for common document layouts.
   let rowBandTolerance: CGFloat = 0.015
-  let sortedBlocks = blocks.enumerated().sorted { lhs, rhs in
-    let dy = abs(lhs.element.top - rhs.element.top)
-    if dy < rowBandTolerance {
-      if lhs.element.left != rhs.element.left {
-        return lhs.element.left < rhs.element.left
-      }
-      return lhs.offset < rhs.offset
+  // Sort by top first, then walk top-to-bottom assigning each block to a row
+  // band: a new band starts whenever the next block's top exceeds the
+  // current band's top by more than the tolerance. Bucketing first gives a
+  // deterministic, transitive order — a single comparator that mixes the
+  // tolerance check with a top-edge fallback would not be transitive (A and
+  // B can share a band, B and C can share a band, while A and C don't).
+  let byTopThenOffset = blocks.enumerated().sorted { lhs, rhs in
+    if lhs.element.top != rhs.element.top {
+      return lhs.element.top < rhs.element.top
     }
-    return lhs.element.top < rhs.element.top
+    return lhs.offset < rhs.offset
   }
-  let sections = sortedBlocks.map { $0.element.text }
+  var banded: [(band: Int, block: DocumentBlock, offset: Int)] = []
+  var currentBand = 0
+  var bandTop: CGFloat = byTopThenOffset.first?.element.top ?? 0
+  for entry in byTopThenOffset {
+    if entry.element.top - bandTop > rowBandTolerance {
+      currentBand += 1
+      bandTop = entry.element.top
+    }
+    banded.append((currentBand, entry.element, entry.offset))
+  }
+  let sortedBlocks = banded.sorted { lhs, rhs in
+    if lhs.band != rhs.band {
+      return lhs.band < rhs.band
+    }
+    if lhs.block.left != rhs.block.left {
+      return lhs.block.left < rhs.block.left
+    }
+    return lhs.offset < rhs.offset
+  }
+  let sections = sortedBlocks.map { $0.block.text }
 
   return sections.joined(separator: "\n\n")
 }
