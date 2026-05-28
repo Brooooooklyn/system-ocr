@@ -52,6 +52,12 @@ pub enum OcrError {
   StringFromFirstObject,
   #[error("Windows error {0}")]
   WindowsError(String),
+  /// The RecognizeDocumentsRequest sidecar dylib could not be loaded
+  /// (OS < macOS 26, missing sidecar file, or missing Swift runtime).
+  /// Distinct from a sidecar-present runtime failure so the macOS dispatch
+  /// can fall through silently here while surfacing other failures.
+  #[error("RecognizeDocumentsRequest sidecar unavailable")]
+  DocumentsSidecarUnavailable,
 }
 
 pub struct RecognizeTask {

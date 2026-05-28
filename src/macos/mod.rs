@@ -48,12 +48,23 @@ pub(crate) fn perform_ocr(
   // averaged across the observations the recognizer returned.
   #[cfg(has_recognize_documents)]
   {
-    if matches!(accuracy, OcrAccuracy::Accurate)
-      && !explicit_langs
-      && let Ok((text, confidence)) =
-        documents::perform_recognize_documents(&mut image, &resolved_langs)
-    {
-      return Ok((text, confidence));
+    if matches!(accuracy, OcrAccuracy::Accurate) && !explicit_langs {
+      match documents::perform_recognize_documents(&mut image, &resolved_langs) {
+        Ok((text, confidence)) => return Ok((text, confidence)),
+        Err(OcrError::DocumentsSidecarUnavailable) => {
+          // Expected on macOS < 26, missing sidecar dylib, or absent Swift
+          // runtime — silently fall through to the legacy path.
+        }
+        Err(err) => {
+          // Sidecar IS loaded but the request failed (Vision regression,
+          // unreadable image, etc.). Surface it on stderr so production
+          // bugs are observable, but still fall through so callers keep
+          // getting OCR output.
+          eprintln!(
+            "system-ocr: RecognizeDocumentsRequest failed ({err}); falling back to VNRecognizeTextRequest"
+          );
+        }
+      }
     }
     // If the structured-document path was skipped or failed (e.g. runtime
     // < macOS 26, missing sidecar dylib, or absent Swift runtime), fall

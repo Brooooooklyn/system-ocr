@@ -16,6 +16,17 @@ fn compile_swift() {
   let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
   let swift_src = format!("{manifest_dir}/src/macos/recognize_documents.swift");
 
+  // Emit rerun directives BEFORE any early return so cargo always knows when
+  // to re-invoke the build script. The toolchain-selecting env vars below
+  // determine which Xcode/SDK `xcrun` and `swiftc` resolve to; changing them
+  // (e.g. switching `DEVELOPER_DIR` or `xcode-select` target) must invalidate
+  // the cached build script output.
+  println!("cargo:rerun-if-changed=src/macos/recognize_documents.swift");
+  println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
+  println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
+  println!("cargo:rerun-if-env-changed=SDKROOT");
+  println!("cargo:rerun-if-env-changed=TOOLCHAINS");
+
   if !std::path::Path::new(&swift_src).exists() {
     return;
   }
@@ -29,7 +40,6 @@ fn compile_swift() {
       return;
     }
   };
-  println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
   let deployment_target =
     std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "11.0".to_string());
   let target = format!("{target_arch}-apple-macosx{deployment_target}");
@@ -199,6 +209,4 @@ fn compile_swift() {
   // Set cfg flag so Rust code knows the sidecar was produced at build time.
   // Runtime presence is still verified via dlopen.
   println!("cargo:rustc-cfg=has_recognize_documents");
-
-  println!("cargo:rerun-if-changed=src/macos/recognize_documents.swift");
 }

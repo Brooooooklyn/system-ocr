@@ -123,9 +123,9 @@ pub(crate) fn perform_recognize_documents(
   image: &mut Either<String, Uint8Array>,
   preferred_langs: &[String],
 ) -> std::result::Result<(String, f32), OcrError> {
-  let bridge = BRIDGE.as_ref().ok_or_else(|| {
-    OcrError::ErrorWithDesc("RecognizeDocumentsRequest sidecar unavailable".into())
-  })?;
+  let bridge = BRIDGE
+    .as_ref()
+    .ok_or(OcrError::DocumentsSidecarUnavailable)?;
 
   // Encode the language hints as a comma-separated UTF-8 string. The Swift
   // bridge will split on `,` and apply them via
