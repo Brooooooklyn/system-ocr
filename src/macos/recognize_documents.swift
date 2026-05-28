@@ -455,7 +455,11 @@ private func formatTable(_ table: DocumentObservation.Container.Table) -> String
         row == cell.rowRange.lowerBound,
         col == cell.columnRange.lowerBound
       {
+        // Cell transcripts can contain CR/LF/TAB which would break the TSV grid shape.
         text = cell.content.text.transcript
+          .replacingOccurrences(of: "\r", with: " ")
+          .replacingOccurrences(of: "\n", with: " ")
+          .replacingOccurrences(of: "\t", with: " ")
       } else {
         text = ""
       }
