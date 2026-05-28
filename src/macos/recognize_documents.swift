@@ -212,47 +212,17 @@ private func formatObservations(_ observations: [DocumentObservation]) -> String
 }
 
 /// Internal block produced by `formatDocument` before it joins to the final
-/// transcript. Each block carries the rendered text plus enough of its
-/// bounding region to place it in two-dimensional reading order.
-///
-/// Coordinates are stored in a TOP-LEFT origin space (top = `1.0 -
-/// (rect.origin.y + rect.height)`, with the original `NormalizedRect`
-/// reported by Vision living in a LOWER-LEFT origin space — see
-/// Vision.swiftinterface line 1306 `public struct NormalizedRect` and lines
-/// 1315–1322 exposing `origin: CGPoint`, `width: CGFloat`, `height:
-/// CGFloat`). With top-left semantics a SMALLER `top` is HIGHER on the page,
-/// which lets the comparator read like normal English reading order
-/// (top-to-bottom, then left-to-right within a row).
+/// transcript. Each block carries the rendered text plus the set of
+/// `RecognizedTextObservation.uuid`s it owns. The UUID set drives the
+/// reading-order walk in Phase 4 (`container.text.lines` is column-aware
+/// reading order; we emit a block the first time any of its lines surfaces in
+/// that walk).
 @available(macOS 26, *)
 private struct DocumentBlock {
   let text: String
-  /// Top edge of the block in TOP-LEFT-origin normalised coordinates.
-  /// Smaller = higher on the page.
-  let top: CGFloat
-  /// Left edge of the block in TOP-LEFT-origin normalised coordinates
-  /// (same as Vision's `origin.x`, which is already left-origin).
-  let left: CGFloat
-}
-
-/// Compute the top edge of a `BoundingRegionProviding` block in TOP-LEFT
-/// origin normalised coordinates. Vision exposes the bounding region via
-/// `boundingRegion.boundingBox` — a `NormalizedRect`
-/// (Vision.swiftinterface line 1306) whose `origin: CGPoint`
-/// (line 1315) is in the LOWER-LEFT corner of the rect. The TOP edge in
-/// lower-left coordinates is `origin.y + height`, and converting to a
-/// top-left origin is therefore `1.0 - (origin.y + height)`.
-@available(macOS 26, *)
-private func topEdge(of region: NormalizedRegion) -> CGFloat {
-  let rect = region.boundingBox
-  return 1.0 - (rect.origin.y + rect.height)
-}
-
-/// Left edge of a `BoundingRegionProviding` block in normalised coordinates.
-/// `NormalizedRect.origin.x` (Vision.swiftinterface line 1306, fields
-/// 1315–1322) is already a left-origin value so no conversion is needed.
-@available(macOS 26, *)
-private func leftEdge(of region: NormalizedRegion) -> CGFloat {
-  region.boundingBox.origin.x
+  /// All `RecognizedTextObservation.uuid`s owned by this block. Empty for
+  /// stray lines that aren't tied to any structured surface.
+  let lineIDs: Set<UUID>
 }
 
 @available(macOS 26, *)
@@ -263,18 +233,13 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
   // transcripts happen to match (a repeated label, status, date, etc.) are
   // not silently dropped.
   //
-  // The previous implementation bucketed by structure type (title, then
-  // paragraphs, then lists, then tables), which destroyed document reading
-  // order — a paragraph between two tables would jump to the prose section
-  // ahead of both tables. We now collect every top-level block with its
-  // bounding-region top edge (Vision exposes `boundingRegion: NormalizedRegion`
-  // on `Container.Text`, `Container.Table`, and `Container.List` — see
-  // Vision.swiftinterface lines 2455-2620) and re-emit them in spatial
-  // (top-to-bottom) order. Each block type still uses its dedicated
-  // formatter (TSV for tables, marker+text for list items, joined
-  // transcripts for paragraphs/titles), and line-level UUID dedup still
-  // prevents the same observation from being emitted twice when it appears
-  // inside a nested structure.
+  // Reading-order strategy: instead of sorting blocks by their bounding-box
+  // top/left (which interleaves columns in multi-column prose, e.g.
+  // LR-LR-LR rather than LL-RR), we walk `container.text.lines` — Vision's
+  // own column-aware natural reading order — and emit each top-level block
+  // the FIRST time any line it owns is encountered. Tables and lists fall
+  // into place naturally because their constituent line UUIDs also appear
+  // in `container.text.lines`.
 
   // Phase 1: pre-collect every line UUID owned by nested structures
   // (tables/lists/title) so plain paragraph emission can skip them. Doing
@@ -295,35 +260,49 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
     }
   }
 
-  // Phase 2: build the spatially-ordered block list.
+  // Phase 2: build the block list. Each block records the line UUIDs it
+  // owns so Phase 4 can place it in reading order.
   var blocks: [DocumentBlock] = []
 
   if let title = container.title {
     let titleText = title.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
     if !titleText.isEmpty {
-      blocks.append(
-        DocumentBlock(
-          text: titleText,
-          top: topEdge(of: title.boundingRegion),
-          left: leftEdge(of: title.boundingRegion)
-        ))
+      let ids = Set(title.lines.map { $0.uuid })
+      blocks.append(DocumentBlock(text: titleText, lineIDs: ids))
     }
   }
 
   for paragraph in container.paragraphs {
-    let kept = paragraph.lines.filter { !consumedLineIDs.contains($0.uuid) }
-    if kept.isEmpty { continue }
-    for line in kept {
-      consumedLineIDs.insert(line.uuid)
+    let paragraphLineIDs = Set(paragraph.lines.map { $0.uuid })
+    let alreadyConsumed = paragraphLineIDs.intersection(consumedLineIDs)
+    // Skip paragraphs whose every line was already claimed by a
+    // table/list/title surface (dedup against nested structures).
+    if alreadyConsumed.count == paragraphLineIDs.count { continue }
+
+    // Two joining policies:
+    //   * No filter applied -> emit `paragraph.transcript` verbatim so
+    //     Vision's own intra-paragraph joining (typically spaces for prose,
+    //     newlines for poetry/addresses) is preserved.
+    //   * Some lines suppressed -> rebuild from the surviving lines and
+    //     join with a single space, mirroring the legacy
+    //     `VNRecognizeTextRequest` path which concatenates per-observation
+    //     transcripts with spaces.
+    let text: String
+    let keptIDs: Set<UUID>
+    if alreadyConsumed.isEmpty {
+      text = paragraph.transcript
+      keptIDs = paragraphLineIDs
+    } else {
+      let kept = paragraph.lines.filter { !consumedLineIDs.contains($0.uuid) }
+      text = kept.map { $0.transcript }.joined(separator: " ")
+      keptIDs = Set(kept.map { $0.uuid })
     }
-    let text = kept.map { $0.transcript }.joined(separator: "\n")
-    if text.isEmpty { continue }
-    blocks.append(
-      DocumentBlock(
-        text: text,
-        top: topEdge(of: paragraph.boundingRegion),
-        left: leftEdge(of: paragraph.boundingRegion)
-      ))
+
+    for id in keptIDs {
+      consumedLineIDs.insert(id)
+    }
+    if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+    blocks.append(DocumentBlock(text: text, lineIDs: keptIDs))
   }
 
   for list in container.lists {
@@ -340,92 +319,60 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
       }
     }
     if lines.isEmpty { continue }
-    blocks.append(
-      DocumentBlock(
-        text: lines.joined(separator: "\n"),
-        top: topEdge(of: list.boundingRegion),
-        left: leftEdge(of: list.boundingRegion)
-      ))
+    var ids: Set<UUID> = []
+    for item in list.items {
+      ids.formUnion(allLineIDs(in: item.content))
+    }
+    blocks.append(DocumentBlock(text: lines.joined(separator: "\n"), lineIDs: ids))
   }
 
   for table in container.tables {
     let rendered = formatTable(table)
     if rendered.isEmpty { continue }
-    blocks.append(
-      DocumentBlock(
-        text: rendered,
-        top: topEdge(of: table.boundingRegion),
-        left: leftEdge(of: table.boundingRegion)
-      ))
+    blocks.append(DocumentBlock(text: rendered, lineIDs: table.cellsContainerLineIDs))
   }
 
-  // Phase 3: safety net — fold any line surfaced only by the top-level
-  //   `container.text.lines` and not yet rendered above into the same
-  //   spatial sort. Vision occasionally exposes stray lines (captions,
-  //   footnotes, sidebars) that don't belong to any paragraph/list/table.
-  //   Each `RecognizedTextObservation` exposes its own `boundingRegion`
-  //   (Vision.swiftinterface line 1366), so we can place those leftovers in
-  //   reading order alongside the in-flow blocks rather than dumping them at
-  //   the end.
-  for line in container.text.lines where !consumedLineIDs.contains(line.uuid) {
-    let transcript = line.transcript
-    if transcript.isEmpty { continue }
-    blocks.append(
-      DocumentBlock(
-        text: transcript,
-        top: topEdge(of: line.boundingRegion),
-        left: leftEdge(of: line.boundingRegion)
-      ))
+  // Phase 3: emit blocks in reading order by walking `container.text.lines`
+  // — Vision returns these in natural reading order, including column-aware
+  // ordering for multi-column layouts. Each block is emitted the first time
+  // ANY of its owned lines is encountered. Stray lines (no owning block) are
+  // emitted in place as standalone transcripts.
+  let blockIndexByLine: [UUID: Int] = {
+    var map: [UUID: Int] = [:]
+    for (i, block) in blocks.enumerated() {
+      for id in block.lineIDs {
+        // First writer wins; a line nominally owned by two structures
+        // (rare — typically only happens when nested dedup missed) is
+        // attributed to the earlier-collected structure.
+        if map[id] == nil { map[id] = i }
+      }
+    }
+    return map
+  }()
+
+  var emitted = Array(repeating: false, count: blocks.count)
+  var sections: [String] = []
+  for line in container.text.lines {
+    if let idx = blockIndexByLine[line.uuid] {
+      if !emitted[idx] {
+        emitted[idx] = true
+        sections.append(blocks[idx].text)
+      }
+    } else {
+      // Stray line not owned by any structured block — emit it in place.
+      let transcript = line.transcript
+      if !transcript.isEmpty {
+        sections.append(transcript)
+      }
+    }
   }
 
-  // Phase 4: sort into reading order. Blocks whose top edges fall within a
-  //   small vertical tolerance (`rowBandTolerance`) are treated as belonging
-  //   to the SAME row band and ordered left-to-right within that band — this
-  //   keeps multi-column layouts, side-by-side labels+values, and captions
-  //   next to images from being interleaved across columns. Outside that
-  //   tolerance the comparator falls back to top-to-bottom ordering.
-  //   `enumerated()` provides a stable tiebreaker on the original emission
-  //   order when both top AND left coincide exactly.
-  //
-  //   `0.015` (~1.5% of the normalised page height) is empirically the
-  //   sweet spot for typical pages: small enough that two visually distinct
-  //   rows aren't merged, large enough to absorb the per-block top-edge
-  //   jitter Vision introduces when blocks of different heights share a row
-  //   (e.g. a paragraph next to a single-line caption). Values in the
-  //   0.005–0.02 range all work for common document layouts.
-  let rowBandTolerance: CGFloat = 0.015
-  // Sort by top first, then walk top-to-bottom assigning each block to a row
-  // band: a new band starts whenever the next block's top exceeds the
-  // current band's top by more than the tolerance. Bucketing first gives a
-  // deterministic, transitive order — a single comparator that mixes the
-  // tolerance check with a top-edge fallback would not be transitive (A and
-  // B can share a band, B and C can share a band, while A and C don't).
-  let byTopThenOffset = blocks.enumerated().sorted { lhs, rhs in
-    if lhs.element.top != rhs.element.top {
-      return lhs.element.top < rhs.element.top
-    }
-    return lhs.offset < rhs.offset
+  // Defensive: append any block that owned UUIDs not present in
+  // `container.text.lines` (shouldn't happen, but a structure synthesised
+  // without a matching line surface would otherwise be dropped).
+  for (i, block) in blocks.enumerated() where !emitted[i] {
+    sections.append(block.text)
   }
-  var banded: [(band: Int, block: DocumentBlock, offset: Int)] = []
-  var currentBand = 0
-  var bandTop: CGFloat = byTopThenOffset.first?.element.top ?? 0
-  for entry in byTopThenOffset {
-    if entry.element.top - bandTop > rowBandTolerance {
-      currentBand += 1
-      bandTop = entry.element.top
-    }
-    banded.append((currentBand, entry.element, entry.offset))
-  }
-  let sortedBlocks = banded.sorted { lhs, rhs in
-    if lhs.band != rhs.band {
-      return lhs.band < rhs.band
-    }
-    if lhs.block.left != rhs.block.left {
-      return lhs.block.left < rhs.block.left
-    }
-    return lhs.offset < rhs.offset
-  }
-  let sections = sortedBlocks.map { $0.block.text }
 
   return sections.joined(separator: "\n\n")
 }
@@ -488,11 +435,30 @@ private func formatTable(_ table: DocumentObservation.Container.Table) -> String
   let rowCount = table.rows.count
   let colCount = table.columns.count
   guard rowCount > 0, colCount > 0 else { return "" }
+  // Merged cells (macOS 26 Vision exposes `Cell.rowRange` /
+  // `Cell.columnRange` as `ClosedRange<Int>` — see Vision.swiftinterface
+  // lines 2461 and 2464) span multiple `(row, col)` coordinates and
+  // `table.cell(row:col:)` returns the same `Cell` for every coordinate the
+  // merged region covers. Naively transcribing `cell.content.text.transcript`
+  // at every coordinate would duplicate the merged text across the TSV.
+  // Emit the transcript only at the cell's top-left anchor
+  // (`rowRange.lowerBound`, `columnRange.lowerBound`) and leave the other
+  // coordinates the merged cell covers as empty strings so TSV column
+  // alignment stays consistent for downstream parsers.
   var rows: [String] = []
   for row in 0..<rowCount {
     var cells: [String] = []
     for col in 0..<colCount {
-      let text = table.cell(row: row, col: col)?.content.text.transcript ?? ""
+      let cell = table.cell(row: row, col: col)
+      let text: String
+      if let cell,
+        row == cell.rowRange.lowerBound,
+        col == cell.columnRange.lowerBound
+      {
+        text = cell.content.text.transcript
+      } else {
+        text = ""
+      }
       cells.append(text)
     }
     rows.append(cells.joined(separator: "\t"))
