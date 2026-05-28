@@ -1,7 +1,6 @@
 import CoreGraphics
 import Dispatch
 import Foundation
-import ImageIO
 import Vision
 
 // MARK: - C-compatible entry points
@@ -90,14 +89,13 @@ public func recognizeDocumentsFromData(
     return nil
   }
 
+  // Pass the bytes to Vision as `Data` end-to-end. The
+  // `ImageProcessingRequest.perform(on data: Data, orientation:)` overload
+  // (Vision.swiftinterface line 593) parses the file format internally and
+  // honours EXIF orientation, matching the behaviour of the URL overload
+  // (line 589). Decoding to a CGImage first would silently discard the
+  // EXIF orientation tag and mis-rotate phone JPEG/HEIC buffers.
   let data = Data(bytes: dataPtr, count: length)
-  guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-    let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil)
-  else {
-    errorOut.pointee = makeCString("Failed to create image from data")
-    return nil
-  }
-
   let langs = parseLangs(langsPtr)
 
   var resultPtr: UnsafeMutablePointer<CChar>? = nil
@@ -111,7 +109,7 @@ public func recognizeDocumentsFromData(
       var request = RecognizeDocumentsRequest()
       applyLanguageHints(&request, langs: langs)
       applyDocumentOptions(&request)
-      let observations = try await request.perform(on: cgImage)
+      let observations = try await request.perform(on: data)
       confidence = averageConfidence(observations)
       resultPtr = makeCString(formatObservations(observations))
     } catch {
