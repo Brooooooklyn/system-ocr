@@ -16,6 +16,7 @@ unsafe extern "C" {
   fn dlopen(filename: *const c_char, flag: c_int) -> *mut c_void;
   fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
   fn dladdr(addr: *const c_void, info: *mut DlInfo) -> c_int;
+  fn dlerror() -> *mut c_char;
 }
 
 #[repr(C)]
@@ -62,13 +63,55 @@ unsafe impl Sync for Bridge {}
 
 static BRIDGE: LazyLock<Option<Bridge>> = LazyLock::new(load_bridge);
 
+/// Read the current `dlerror()` message, if any. `dlerror` returns NULL when
+/// no error is pending, or a pointer to a process-owned C string describing
+/// the most recent failure (the call also clears the pending error).
+fn take_dlerror() -> Option<String> {
+  // SAFETY: `dlerror()` returns either NULL or a pointer to a NUL-terminated
+  // C string owned by libdyld; copying it out before the next dl* call is
+  // safe.
+  let ptr = unsafe { dlerror() };
+  if ptr.is_null() {
+    None
+  } else {
+    Some(
+      unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned(),
+    )
+  }
+}
+
 fn load_bridge() -> Option<Bridge> {
   let dylib_path = sidecar_path()?;
+
+  // "File not present" is the expected case on systems shipped before the
+  // structured-document API (or in release builds where the sidecar was
+  // intentionally omitted — e.g. non-Darwin targets via the build-time gate).
+  // Fall through silently; the caller will treat this as
+  // `DocumentsSidecarUnavailable` and route to the legacy OCR path.
+  if !dylib_path.exists() {
+    return None;
+  }
+
   let c_path = CString::new(dylib_path.to_str()?).ok()?;
+  // Clear any stale dlerror state before our calls so the next `take_dlerror`
+  // reflects only failures originating here.
+  let _ = take_dlerror();
   // SAFETY: `c_path` is a valid NUL-terminated string for the duration of
   // the call; `dlopen` either returns a valid handle or null.
   let handle = unsafe { dlopen(c_path.as_ptr(), RTLD_NOW | RTLD_LOCAL) };
   if handle.is_null() {
+    // Sidecar is physically present but failed to load (wrong architecture,
+    // ABI skew, missing Swift runtime, signature mismatch, etc.). This is a
+    // real release regression — surface it on stderr so operators see it in
+    // production logs. Still return `None` so the caller falls through to the
+    // legacy path and end-users keep getting OCR output.
+    let msg = take_dlerror().unwrap_or_else(|| "unknown dlopen error".to_string());
+    eprintln!(
+      "system-ocr: sidecar at {} failed to load: {msg}",
+      dylib_path.display()
+    );
     return None;
   }
   // We intentionally never `dlclose` — the dylib stays loaded for the
@@ -80,11 +123,21 @@ fn load_bridge() -> Option<Bridge> {
 
   // SAFETY: `handle` is a valid dlopen handle; symbol names are valid
   // NUL-terminated strings.
+  let _ = take_dlerror();
   let from_path = unsafe { dlsym(handle, from_path_sym.as_ptr()) };
   let from_data = unsafe { dlsym(handle, from_data_sym.as_ptr()) };
   let free = unsafe { dlsym(handle, free_sym.as_ptr()) };
 
   if from_path.is_null() || from_data.is_null() || free.is_null() {
+    // Loaded the dylib but couldn't resolve one of our `@_cdecl` symbols —
+    // typically an export-list drift between the Rust caller and the Swift
+    // sidecar. Treat exactly like the broken-load case above: log loudly and
+    // fall through.
+    let msg = take_dlerror().unwrap_or_else(|| "missing exported symbol".to_string());
+    eprintln!(
+      "system-ocr: sidecar at {} loaded but symbol lookup failed: {msg}",
+      dylib_path.display()
+    );
     return None;
   }
 

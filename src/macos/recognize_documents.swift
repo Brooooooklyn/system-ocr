@@ -200,26 +200,47 @@ private func formatObservations(_ observations: [DocumentObservation]) -> String
 }
 
 /// Internal block produced by `formatDocument` before it joins to the final
-/// transcript. Each block carries the rendered text plus the top-edge y of
-/// its bounding region (in Vision's lower-left normalised coordinates) so we
-/// can sort blocks into document reading order.
+/// transcript. Each block carries the rendered text plus enough of its
+/// bounding region to place it in two-dimensional reading order.
+///
+/// Coordinates are stored in a TOP-LEFT origin space (top = `1.0 -
+/// (rect.origin.y + rect.height)`, with the original `NormalizedRect`
+/// reported by Vision living in a LOWER-LEFT origin space — see
+/// Vision.swiftinterface line 1306 `public struct NormalizedRect` and lines
+/// 1315–1322 exposing `origin: CGPoint`, `width: CGFloat`, `height:
+/// CGFloat`). With top-left semantics a SMALLER `top` is HIGHER on the page,
+/// which lets the comparator read like normal English reading order
+/// (top-to-bottom, then left-to-right within a row).
 @available(macOS 26, *)
 private struct DocumentBlock {
   let text: String
-  /// Top edge of the block in Vision's normalised (lower-left origin)
-  /// coordinate space. Larger values are HIGHER on the page, so sorting by
-  /// `topEdge` descending yields top-to-bottom reading order.
-  let topEdge: CGFloat
+  /// Top edge of the block in TOP-LEFT-origin normalised coordinates.
+  /// Smaller = higher on the page.
+  let top: CGFloat
+  /// Left edge of the block in TOP-LEFT-origin normalised coordinates
+  /// (same as Vision's `origin.x`, which is already left-origin).
+  let left: CGFloat
 }
 
-/// Compute the top-edge y of a `BoundingRegionProviding` block in
-/// Vision's normalised (lower-left origin) coordinates. Vision exposes the
-/// bounding region via `boundingRegion.boundingBox`, a `NormalizedRect`
-/// whose `origin.y + height` corresponds to the top of the rect.
+/// Compute the top edge of a `BoundingRegionProviding` block in TOP-LEFT
+/// origin normalised coordinates. Vision exposes the bounding region via
+/// `boundingRegion.boundingBox` — a `NormalizedRect`
+/// (Vision.swiftinterface line 1306) whose `origin: CGPoint`
+/// (line 1315) is in the LOWER-LEFT corner of the rect. The TOP edge in
+/// lower-left coordinates is `origin.y + height`, and converting to a
+/// top-left origin is therefore `1.0 - (origin.y + height)`.
 @available(macOS 26, *)
 private func topEdge(of region: NormalizedRegion) -> CGFloat {
   let rect = region.boundingBox
-  return rect.origin.y + rect.height
+  return 1.0 - (rect.origin.y + rect.height)
+}
+
+/// Left edge of a `BoundingRegionProviding` block in normalised coordinates.
+/// `NormalizedRect.origin.x` (Vision.swiftinterface line 1306, fields
+/// 1315–1322) is already a left-origin value so no conversion is needed.
+@available(macOS 26, *)
+private func leftEdge(of region: NormalizedRegion) -> CGFloat {
+  region.boundingBox.origin.x
 }
 
 @available(macOS 26, *)
@@ -268,7 +289,12 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
   if let title = container.title {
     let titleText = title.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
     if !titleText.isEmpty {
-      blocks.append(DocumentBlock(text: titleText, topEdge: topEdge(of: title.boundingRegion)))
+      blocks.append(
+        DocumentBlock(
+          text: titleText,
+          top: topEdge(of: title.boundingRegion),
+          left: leftEdge(of: title.boundingRegion)
+        ))
     }
   }
 
@@ -280,7 +306,12 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
     }
     let text = kept.map { $0.transcript }.joined(separator: "\n")
     if text.isEmpty { continue }
-    blocks.append(DocumentBlock(text: text, topEdge: topEdge(of: paragraph.boundingRegion)))
+    blocks.append(
+      DocumentBlock(
+        text: text,
+        top: topEdge(of: paragraph.boundingRegion),
+        left: leftEdge(of: paragraph.boundingRegion)
+      ))
   }
 
   for list in container.lists {
@@ -298,41 +329,70 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
     }
     if lines.isEmpty { continue }
     blocks.append(
-      DocumentBlock(text: lines.joined(separator: "\n"), topEdge: topEdge(of: list.boundingRegion))
-    )
+      DocumentBlock(
+        text: lines.joined(separator: "\n"),
+        top: topEdge(of: list.boundingRegion),
+        left: leftEdge(of: list.boundingRegion)
+      ))
   }
 
   for table in container.tables {
     let rendered = formatTable(table)
     if rendered.isEmpty { continue }
-    blocks.append(DocumentBlock(text: rendered, topEdge: topEdge(of: table.boundingRegion)))
+    blocks.append(
+      DocumentBlock(
+        text: rendered,
+        top: topEdge(of: table.boundingRegion),
+        left: leftEdge(of: table.boundingRegion)
+      ))
   }
 
-  // Phase 3: sort top-to-bottom. Vision's normalised coordinate origin is
-  // the LOWER-left of the image, so a larger `topEdge` value is higher up
-  // on the page — descending order gives reading order. Use a stable sort
-  // (via `enumerated()` tiebreaker on the original index) so blocks with
-  // identical (or near-identical) top edges retain their emission order.
+  // Phase 3: safety net — fold any line surfaced only by the top-level
+  //   `container.text.lines` and not yet rendered above into the same
+  //   spatial sort. Vision occasionally exposes stray lines (captions,
+  //   footnotes, sidebars) that don't belong to any paragraph/list/table.
+  //   Each `RecognizedTextObservation` exposes its own `boundingRegion`
+  //   (Vision.swiftinterface line 1366), so we can place those leftovers in
+  //   reading order alongside the in-flow blocks rather than dumping them at
+  //   the end.
+  for line in container.text.lines where !consumedLineIDs.contains(line.uuid) {
+    let transcript = line.transcript
+    if transcript.isEmpty { continue }
+    blocks.append(
+      DocumentBlock(
+        text: transcript,
+        top: topEdge(of: line.boundingRegion),
+        left: leftEdge(of: line.boundingRegion)
+      ))
+  }
+
+  // Phase 4: sort into reading order. Blocks whose top edges fall within a
+  //   small vertical tolerance (`rowBandTolerance`) are treated as belonging
+  //   to the SAME row band and ordered left-to-right within that band — this
+  //   keeps multi-column layouts, side-by-side labels+values, and captions
+  //   next to images from being interleaved across columns. Outside that
+  //   tolerance the comparator falls back to top-to-bottom ordering.
+  //   `enumerated()` provides a stable tiebreaker on the original emission
+  //   order when both top AND left coincide exactly.
+  //
+  //   `0.015` (~1.5% of the normalised page height) is empirically the
+  //   sweet spot for typical pages: small enough that two visually distinct
+  //   rows aren't merged, large enough to absorb the per-block top-edge
+  //   jitter Vision introduces when blocks of different heights share a row
+  //   (e.g. a paragraph next to a single-line caption). Values in the
+  //   0.005–0.02 range all work for common document layouts.
+  let rowBandTolerance: CGFloat = 0.015
   let sortedBlocks = blocks.enumerated().sorted { lhs, rhs in
-    if lhs.element.topEdge != rhs.element.topEdge {
-      return lhs.element.topEdge > rhs.element.topEdge
+    let dy = abs(lhs.element.top - rhs.element.top)
+    if dy < rowBandTolerance {
+      if lhs.element.left != rhs.element.left {
+        return lhs.element.left < rhs.element.left
+      }
+      return lhs.offset < rhs.offset
     }
-    return lhs.offset < rhs.offset
+    return lhs.element.top < rhs.element.top
   }
-  var sections = sortedBlocks.map { $0.element.text }
-
-  // Phase 4: safety net — append any line surfaced only by the top-level
-  //   `container.text.lines` and not yet rendered above. Vision occasionally
-  //   exposes stray lines (captions, footnotes, etc.) that don't belong to
-  //   any paragraph/list/table — without this fallback they would be
-  //   dropped. The leftover bucket is intentionally placed at the end (its
-  //   relative order to in-flow blocks can't be recovered without a bounding
-  //   region per line group, and we already preserve per-line order within
-  //   the bucket via `container.text.lines`).
-  let leftover = container.text.lines.filter { !consumedLineIDs.contains($0.uuid) }
-  if !leftover.isEmpty {
-    sections.append(leftover.map { $0.transcript }.joined(separator: "\n"))
-  }
+  let sections = sortedBlocks.map { $0.element.text }
 
   return sections.joined(separator: "\n\n")
 }
