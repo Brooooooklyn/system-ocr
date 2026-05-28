@@ -212,10 +212,18 @@ jobs:
           - host: windows-11-arm
             target: aarch64-pc-windows-msvc
             architecture: arm64
-          - host: macos-latest
+          # Darwin test hosts pin to macOS 26 so the strict sidecar smoke
+          # below actually executes every push/PR instead of self-skipping.
+          # `macos-26-intel` (x64) and `macos-26` (arm64) are both GA in the
+          # actions/runner-images catalog. The build job stays on
+          # macos-latest + manually selected Xcode 26; only the runtime
+          # exercise needs to be on macOS 26 (Vision/Swift runtime), since
+          # the sidecar's `if #available(macOS 26, *)` gate would otherwise
+          # short-circuit on macOS 15.
+          - host: macos-26-intel
             target: x86_64-apple-darwin
             architecture: x64
-          - host: macos-latest
+          - host: macos-26
             target: aarch64-apple-darwin
             architecture: arm64
         node:
@@ -250,17 +258,19 @@ jobs:
           # `pnpm test` above runs in non-strict mode, so a broken sidecar
           # that errors on every call would silently mask via legacy
           # fallback. Force the strict path here so the sidecar's runtime
-          # success is asserted end-to-end — but only on a runner where
-          # macOS itself is 26 or newer. The build SDK is irrelevant in
+          # success is asserted end-to-end. The build SDK is irrelevant in
           # this job: the artifact was produced by a different job and we
           # never invoke swiftc here. The sidecar's Swift code internally
-          # gates on `if #available(macOS 26, *)`, so on macOS 15 every
-          # strict call would fail with "requires macOS 26 or later".
+          # gates on `if #available(macOS 26, *)`, so the test host MUST be
+          # macOS 26+ — which is why the matrix above pins macos-26 and
+          # macos-26-intel. If a future runner-image change downgrades the
+          # host OS, fail loudly here instead of silently skipping the
+          # only end-to-end runtime check the dylib gets before publish.
           os="$(sw_vers -productVersion 2>/dev/null || echo unknown)"
           os_major="${os%%.*}"
           if ! [[ "$os_major" =~ ^[0-9]+$ ]] || [ "$os_major" -lt 26 ]; then
-            echo "Skipping sidecar smoke (runner OS $os has no RecognizeDocumentsRequest runtime support)"
-            exit 0
+            echo "::error::Runner OS $os has no RecognizeDocumentsRequest runtime support, but the matrix host is supposed to be macOS 26+. Did the runner-images label change?"
+            exit 1
           fi
           # Map cargo target -> napi-rs platform suffix used in the .node
           # filename emitted by `napi build --target <cargo-target>`.
