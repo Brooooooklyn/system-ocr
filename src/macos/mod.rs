@@ -16,17 +16,28 @@ impl From<OcrAccuracy> for VNRequestTextRecognitionLevel {
 }
 
 pub(crate) fn perform_ocr(
-  mut image: Either<String, Uint8Array>,
+  #[cfg_attr(not(has_recognize_documents), allow(unused_mut))] mut image: Either<
+    String,
+    Uint8Array,
+  >,
   accuracy: OcrAccuracy,
   preferred_langs: Vec<String>,
 ) -> std::result::Result<(String, f32), OcrError> {
-  // On macOS 26+, prefer RecognizeDocumentsRequest for richer structured output.
+  // On macOS 26+, prefer RecognizeDocumentsRequest for richer structured output,
+  // but only when the caller hasn't customised accuracy or preferred languages —
+  // RecognizeDocumentsRequest doesn't expose those knobs, so honour the legacy
+  // path whenever the caller asked for something specific.
   #[cfg(has_recognize_documents)]
   {
-    if let Ok(text) = documents::perform_recognize_documents(&mut image) {
-      return Ok((text, 1.0));
+    let opts_are_default = matches!(accuracy, OcrAccuracy::Accurate) && preferred_langs.is_empty();
+    if opts_are_default {
+      // Confidence is hardcoded to 1.0 because RecognizeDocumentsRequest does
+      // not surface per-observation confidence scores.
+      if let Ok(text) = documents::perform_recognize_documents(&mut image) {
+        return Ok((text, 1.0));
+      }
+      // RecognizeDocumentsRequest failed (e.g. runtime < macOS 26), fall through.
     }
-    // RecognizeDocumentsRequest failed (e.g. runtime < macOS 26), fall through.
   }
 
   perform_ocr_legacy(image, accuracy, preferred_langs)

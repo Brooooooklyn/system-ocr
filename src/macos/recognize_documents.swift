@@ -119,9 +119,12 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
     sections.append(paragraphText)
   }
 
-  // Tables: formatted as ASCII
+  // Tables: rendered as plain tab-separated rows
   for table in container.tables {
-    sections.append(formatTable(table))
+    let rendered = formatTable(table)
+    if !rendered.isEmpty {
+      sections.append(rendered)
+    }
   }
 
   return sections.joined(separator: "\n\n")
@@ -132,42 +135,16 @@ private func formatTable(_ table: DocumentObservation.Container.Table) -> String
   let rowCount = table.rows.count
   let colCount = table.columns.count
   guard rowCount > 0, colCount > 0 else { return "" }
-
-  // Collect cell text
-  var grid: [[String]] = Array(
-    repeating: Array(repeating: "", count: colCount),
-    count: rowCount
-  )
+  var rows: [String] = []
   for row in 0..<rowCount {
+    var cells: [String] = []
     for col in 0..<colCount {
-      if let cell = table.cell(row: row, col: col) {
-        grid[row][col] = cell.content.text.transcript
-      }
+      let text = table.cell(row: row, col: col)?.content.text.transcript ?? ""
+      cells.append(text)
     }
+    rows.append(cells.joined(separator: "\t"))
   }
-
-  // Compute column widths
-  var widths = Array(repeating: 0, count: colCount)
-  for row in grid {
-    for (col, text) in row.enumerated() {
-      widths[col] = max(widths[col], text.count)
-    }
-  }
-
-  // Render
-  let separator = "+" + widths.map { String(repeating: "-", count: $0 + 2) }.joined(separator: "+") + "+"
-  var lines: [String] = [separator]
-  for (i, row) in grid.enumerated() {
-    let cells = row.enumerated().map { (col, text) in
-      " " + text.padding(toLength: widths[col], withPad: " ", startingAt: 0) + " "
-    }
-    lines.append("|" + cells.joined(separator: "|") + "|")
-    // Add separator after header row and at the end
-    if i == 0 || i == grid.count - 1 {
-      lines.append(separator)
-    }
-  }
-  return lines.joined(separator: "\n")
+  return rows.joined(separator: "\n")
 }
 
 // MARK: - Helpers

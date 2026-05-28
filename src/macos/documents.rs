@@ -37,5 +37,9 @@ pub(crate) fn perform_recognize_documents(
     return Err(OcrError::ErrorWithDesc(err.to_owned()));
   }
 
+  if text.trim().is_empty() {
+    return Err(OcrError::NoTextRecognized);
+  }
+
   Ok(text)
 }

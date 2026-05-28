@@ -29,7 +29,10 @@ fn compile_swift() {
       return;
     }
   };
-  let target = format!("{target_arch}-apple-macosx15.0");
+  println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
+  let deployment_target =
+    std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "11.0".to_string());
+  let target = format!("{target_arch}-apple-macosx{deployment_target}");
 
   let obj_path = format!("{out_dir}/recognize_documents.o");
 
@@ -68,10 +71,7 @@ fn compile_swift() {
     .expect("Failed to run ar");
 
   if !ar_output.status.success() {
-    panic!(
-      "ar failed: {}",
-      String::from_utf8_lossy(&ar_output.stderr)
-    );
+    panic!("ar failed: {}", String::from_utf8_lossy(&ar_output.stderr));
   }
 
   // Tell Cargo to link the static library
@@ -99,10 +99,7 @@ fn compile_swift() {
     .parent()
     .unwrap()
     .join("lib/swift/macosx");
-  println!(
-    "cargo:rustc-link-search=native={}",
-    toolchain_lib.display()
-  );
+  println!("cargo:rustc-link-search=native={}", toolchain_lib.display());
   println!("cargo:rustc-link-search=native=/usr/lib/swift");
 
   // Set rpath so the dylib can find Swift runtime libraries at load time
