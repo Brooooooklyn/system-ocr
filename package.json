@@ -54,7 +54,7 @@
     "chalk": "^5.4.1",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.0",
-    "npm-run-all2": "^8.0.4",
+    "npm-run-all2": "^9.0.0",
     "oxfmt": "^0.52.0",
     "oxlint": "^1.8.0",
     "typescript": "^6.0.0"
