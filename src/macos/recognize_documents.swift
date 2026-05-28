@@ -201,6 +201,29 @@ private func formatObservations(_ observations: [DocumentObservation]) -> String
   observations.map { formatDocument($0.document) }.joined(separator: "\n\n")
 }
 
+/// Internal block produced by `formatDocument` before it joins to the final
+/// transcript. Each block carries the rendered text plus the top-edge y of
+/// its bounding region (in Vision's lower-left normalised coordinates) so we
+/// can sort blocks into document reading order.
+@available(macOS 26, *)
+private struct DocumentBlock {
+  let text: String
+  /// Top edge of the block in Vision's normalised (lower-left origin)
+  /// coordinate space. Larger values are HIGHER on the page, so sorting by
+  /// `topEdge` descending yields top-to-bottom reading order.
+  let topEdge: CGFloat
+}
+
+/// Compute the top-edge y of a `BoundingRegionProviding` block in
+/// Vision's normalised (lower-left origin) coordinates. Vision exposes the
+/// bounding region via `boundingRegion.boundingBox`, a `NormalizedRect`
+/// whose `origin.y + height` corresponds to the top of the rect.
+@available(macOS 26, *)
+private func topEdge(of region: NormalizedRegion) -> CGFloat {
+  let rect = region.boundingBox
+  return rect.origin.y + rect.height
+}
+
 @available(macOS 26, *)
 private func formatDocument(_ container: DocumentObservation.Container) -> String {
   // Render every text surface that `DocumentObservation.Container` exposes —
@@ -208,42 +231,63 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
   // `RecognizedTextObservation.uuid` so that two distinct observations whose
   // transcripts happen to match (a repeated label, status, date, etc.) are
   // not silently dropped.
-  var sections: [String] = []
-  var consumedLineIDs: Set<UUID> = []
+  //
+  // The previous implementation bucketed by structure type (title, then
+  // paragraphs, then lists, then tables), which destroyed document reading
+  // order — a paragraph between two tables would jump to the prose section
+  // ahead of both tables. We now collect every top-level block with its
+  // bounding-region top edge (Vision exposes `boundingRegion: NormalizedRegion`
+  // on `Container.Text`, `Container.Table`, and `Container.List` — see
+  // Vision.swiftinterface lines 2455-2620) and re-emit them in spatial
+  // (top-to-bottom) order. Each block type still uses its dedicated
+  // formatter (TSV for tables, marker+text for list items, joined
+  // transcripts for paragraphs/titles), and line-level UUID dedup still
+  // prevents the same observation from being emitted twice when it appears
+  // inside a nested structure.
 
-  // 1) Title (optional). When present, suppress the same observations from
-  //    later paragraph emission so we don't print them twice.
+  // Phase 1: pre-collect every line UUID owned by nested structures
+  // (tables/lists/title) so plain paragraph emission can skip them. Doing
+  // this in a separate pass keeps dedup deterministic regardless of the
+  // order in which blocks happen to be rendered.
+  var consumedLineIDs: Set<UUID> = []
   if let title = container.title {
-    let titleText = title.transcript
-    if !titleText.isEmpty {
-      sections.append(titleText)
-    }
     for line in title.lines {
       consumedLineIDs.insert(line.uuid)
     }
   }
-
-  // 2) Tables — pre-collect every line owned by any cell's nested container
-  //    so paragraph dedup is honoured. Tables themselves are appended after
-  //    the paragraph/list sections so the prose flows naturally.
-  var tableSections: [String] = []
   for table in container.tables {
     collectContainerLineIDs(table.cellsContainerLineIDs, into: &consumedLineIDs)
-    let rendered = formatTable(table)
-    if !rendered.isEmpty {
-      tableSections.append(rendered)
+  }
+  for list in container.lists {
+    for item in list.items {
+      collectContainerLineIDs(allLineIDs(in: item.content), into: &consumedLineIDs)
     }
   }
 
-  // 3) Lists — collect every line owned by any item's nested container, then
-  //    render the list using each item's marker + text. We use
-  //    `Container.text.transcript` of the item content so that nested
-  //    paragraphs/lines flow as a single string per item.
-  var listSections: [String] = []
+  // Phase 2: build the spatially-ordered block list.
+  var blocks: [DocumentBlock] = []
+
+  if let title = container.title {
+    let titleText = title.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !titleText.isEmpty {
+      blocks.append(DocumentBlock(text: titleText, topEdge: topEdge(of: title.boundingRegion)))
+    }
+  }
+
+  for paragraph in container.paragraphs {
+    let kept = paragraph.lines.filter { !consumedLineIDs.contains($0.uuid) }
+    if kept.isEmpty { continue }
+    for line in kept {
+      consumedLineIDs.insert(line.uuid)
+    }
+    let text = kept.map { $0.transcript }.joined(separator: "\n")
+    if text.isEmpty { continue }
+    blocks.append(DocumentBlock(text: text, topEdge: topEdge(of: paragraph.boundingRegion)))
+  }
+
   for list in container.lists {
     var lines: [String] = []
     for item in list.items {
-      collectContainerLineIDs(allLineIDs(in: item.content), into: &consumedLineIDs)
       let body = item.itemString.isEmpty ? item.content.text.transcript : item.itemString
       let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
       if trimmedBody.isEmpty { continue }
@@ -254,34 +298,39 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
         lines.append("\(marker) \(trimmedBody)")
       }
     }
-    if !lines.isEmpty {
-      listSections.append(lines.joined(separator: "\n"))
+    if lines.isEmpty { continue }
+    blocks.append(
+      DocumentBlock(text: lines.joined(separator: "\n"), topEdge: topEdge(of: list.boundingRegion))
+    )
+  }
+
+  for table in container.tables {
+    let rendered = formatTable(table)
+    if rendered.isEmpty { continue }
+    blocks.append(DocumentBlock(text: rendered, topEdge: topEdge(of: table.boundingRegion)))
+  }
+
+  // Phase 3: sort top-to-bottom. Vision's normalised coordinate origin is
+  // the LOWER-left of the image, so a larger `topEdge` value is higher up
+  // on the page — descending order gives reading order. Use a stable sort
+  // (via `enumerated()` tiebreaker on the original index) so blocks with
+  // identical (or near-identical) top edges retain their emission order.
+  let sortedBlocks = blocks.enumerated().sorted { lhs, rhs in
+    if lhs.element.topEdge != rhs.element.topEdge {
+      return lhs.element.topEdge > rhs.element.topEdge
     }
+    return lhs.offset < rhs.offset
   }
+  var sections = sortedBlocks.map { $0.element.text }
 
-  // 4) Paragraphs (skipping any line already emitted via title/table/list).
-  let paragraphSections: [String] = container.paragraphs.compactMap { paragraph in
-    let kept = paragraph.lines.filter { !consumedLineIDs.contains($0.uuid) }
-    if kept.isEmpty { return nil }
-    for line in kept {
-      consumedLineIDs.insert(line.uuid)
-    }
-    return kept.map { $0.transcript }.joined(separator: "\n")
-  }
-  if !paragraphSections.isEmpty {
-    sections.append(paragraphSections.joined(separator: "\n\n"))
-  }
-
-  // 5) Lists, then tables — keeps structured artefacts at the end of the
-  //    transcript where they're easy to spot.
-  sections.append(contentsOf: listSections)
-  sections.append(contentsOf: tableSections)
-
-  // 6) Safety net: append any observation surfaced only by the top-level
-  //    `container.text.lines` and not yet rendered by the structured paths
-  //    above. Vision occasionally surfaces stray lines (captions, footnotes,
-  //    etc.) that don't belong to a paragraph/list/table — without this
-  //    fallback they would be dropped.
+  // Phase 4: safety net — append any line surfaced only by the top-level
+  //   `container.text.lines` and not yet rendered above. Vision occasionally
+  //   exposes stray lines (captions, footnotes, etc.) that don't belong to
+  //   any paragraph/list/table — without this fallback they would be
+  //   dropped. The leftover bucket is intentionally placed at the end (its
+  //   relative order to in-flow blocks can't be recovered without a bounding
+  //   region per line group, and we already preserve per-line order within
+  //   the bucket via `container.text.lines`).
   let leftover = container.text.lines.filter { !consumedLineIDs.contains($0.uuid) }
   if !leftover.isEmpty {
     sections.append(leftover.map { $0.transcript }.joined(separator: "\n"))

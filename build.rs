@@ -34,6 +34,26 @@ fn compile_swift() {
     std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "11.0".to_string());
   let target = format!("{target_arch}-apple-macosx{deployment_target}");
 
+  // Probe the active macOS SDK version BEFORE invoking swiftc so we can
+  // classify any subsequent compile failure correctly. On SDK 26+ the
+  // structured-document API IS present, so a swiftc failure means a real
+  // bug in `recognize_documents.swift` and must hard-fail the build. On
+  // older SDKs the symbols simply don't exist, so we gracefully skip and
+  // let the addon fall back to the legacy `VNRecognizeTextRequest` path.
+  let sdk_version = std::process::Command::new("xcrun")
+    .args(["--sdk", "macosx", "--show-sdk-version"])
+    .output()
+    .ok()
+    .and_then(|o| String::from_utf8(o.stdout).ok())
+    .map(|s| s.trim().to_string())
+    .unwrap_or_default();
+  let sdk_major: u32 = sdk_version
+    .split('.')
+    .next()
+    .and_then(|s| s.parse().ok())
+    .unwrap_or(0);
+  let sdk_has_documents_api = sdk_major >= 26;
+
   // Build the Swift bridge as a standalone dylib. It is NOT linked into the
   // main `.node` addon — that way the addon stays free of Swift runtime
   // dependencies and remains loadable on older macOS versions (< 10.14.4)
@@ -95,23 +115,34 @@ fn compile_swift() {
 
   if !output.status.success() {
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // Only treat the failure as "missing macOS 26 SDK" when the stderr
-    // mentions one of the structured-document API symbols we depend on. The
-    // previous broader check (`"cannot find"` / `"has no member"`) matched
-    // many ordinary Swift compile errors (typos, unrelated API misuse) and
-    // silently produced an addon that fell back to the legacy path while
-    // shipping a stale dylib copy from a prior run. Narrowing it forces real
-    // bugs in `recognize_documents.swift` to hard-fail the build, which is the
-    // correct behaviour.
+    // Policy: when the active macOS SDK is 26+ the structured-document API
+    // IS available, so any swiftc failure is a real bug (typo, wrong API
+    // usage, etc.) and MUST hard-fail the build — silently falling back to
+    // the legacy path would mask the regression. On older SDKs the symbols
+    // genuinely don't exist; we use a narrow marker-based check (the actual
+    // missing-symbol names) to confirm we're seeing a "missing SDK" error
+    // rather than something else, and skip gracefully so the addon can
+    // still ship with the legacy `VNRecognizeTextRequest` path intact.
+    if sdk_has_documents_api {
+      panic!(
+        "Swift compilation failed on macOS SDK {sdk_version} (>= 26, structured-document API expected to be available):\n{stderr}"
+      );
+    }
     let sdk_missing_markers = ["RecognizeDocumentsRequest", "DocumentObservation"];
     let looks_like_missing_sdk = sdk_missing_markers.iter().any(|sym| stderr.contains(sym));
     if looks_like_missing_sdk {
       eprintln!(
-        "cargo:warning=Skipping RecognizeDocumentsRequest Swift bridge: macOS 26 SDK not available (stderr matched a missing-API marker)"
+        "cargo:warning=Skipping RecognizeDocumentsRequest Swift bridge: macOS SDK {sdk_version} predates 26 (stderr matched a missing-API marker)"
       );
       return;
     }
     panic!("Swift compilation failed:\n{stderr}");
+  }
+
+  if sdk_has_documents_api {
+    println!(
+      "cargo:warning=Built RecognizeDocumentsRequest Swift bridge against macOS SDK {sdk_version}"
+    );
   }
 
   // Copy the freshly built dylib next to the `.node` so it can be discovered
