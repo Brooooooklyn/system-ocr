@@ -44,6 +44,22 @@ fn compile_swift() {
   let dylib_name = "librecognize_documents.dylib";
   let dylib_out = format!("{out_dir}/{dylib_name}");
 
+  // Delete stale destinations BEFORE compiling so that a graceful skip on the
+  // current run cannot pick up a stale dylib from a previous build that did
+  // succeed (or vice-versa). This matters because cargo aggressively caches
+  // build-script outputs and the sibling copies we drop into the manifest dir
+  // and the cargo target root would otherwise persist across runs.
+  let _ = std::fs::remove_file(&dylib_out);
+  let manifest_dest_pre = std::path::PathBuf::from(&manifest_dir).join(dylib_name);
+  let _ = std::fs::remove_file(&manifest_dest_pre);
+  if let Some(target_root) = std::path::PathBuf::from(&out_dir)
+    .ancestors()
+    .nth(3)
+    .map(std::path::Path::to_path_buf)
+  {
+    let _ = std::fs::remove_file(target_root.join(dylib_name));
+  }
+
   let output = match std::process::Command::new("swiftc")
     .args([
       "-emit-library",
@@ -79,10 +95,19 @@ fn compile_swift() {
 
   if !output.status.success() {
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // If the SDK doesn't have RecognizeDocumentsRequest, skip gracefully
-    if stderr.contains("cannot find") || stderr.contains("has no member") {
+    // Only treat the failure as "missing macOS 26 SDK" when the stderr
+    // mentions one of the structured-document API symbols we depend on. The
+    // previous broader check (`"cannot find"` / `"has no member"`) matched
+    // many ordinary Swift compile errors (typos, unrelated API misuse) and
+    // silently produced an addon that fell back to the legacy path while
+    // shipping a stale dylib copy from a prior run. Narrowing it forces real
+    // bugs in `recognize_documents.swift` to hard-fail the build, which is the
+    // correct behaviour.
+    let sdk_missing_markers = ["RecognizeDocumentsRequest", "DocumentObservation"];
+    let looks_like_missing_sdk = sdk_missing_markers.iter().any(|sym| stderr.contains(sym));
+    if looks_like_missing_sdk {
       eprintln!(
-        "cargo:warning=Skipping RecognizeDocumentsRequest Swift bridge: macOS 26 SDK not available"
+        "cargo:warning=Skipping RecognizeDocumentsRequest Swift bridge: macOS 26 SDK not available (stderr matched a missing-API marker)"
       );
       return;
     }

@@ -26,19 +26,23 @@ struct DlInfo {
   dli_saddr: *mut c_void,
 }
 
-// New ABI: each entry point takes an OUT pointer for an error string and
-// returns either a non-NULL malloc'd C-string on success (empty string means
-// "no text recognized") or NULL on failure, in which case `*error_out` will
-// point to a malloc'd error description.
+// New ABI: each entry point takes OUT pointers for the aggregated confidence
+// and an error string, and returns either a non-NULL malloc'd C-string on
+// success (empty string means "no text recognized") or NULL on failure, in
+// which case `*error_out` will point to a malloc'd error description. The
+// Swift bridge initialises `*confidence_out` to `0.0` at entry, so error paths
+// never leave uninitialised memory visible to Rust.
 type FromPathFn = unsafe extern "C" fn(
   path: *const c_char,
   langs: *const c_char,
+  confidence_out: *mut f32,
   error_out: *mut *mut c_char,
 ) -> *mut c_char;
 type FromDataFn = unsafe extern "C" fn(
   data: *const u8,
   len: usize,
   langs: *const c_char,
+  confidence_out: *mut f32,
   error_out: *mut *mut c_char,
 ) -> *mut c_char;
 type FreeFn = unsafe extern "C" fn(*mut c_char);
@@ -118,7 +122,7 @@ fn sidecar_path() -> Option<PathBuf> {
 pub(crate) fn perform_recognize_documents(
   image: &mut Either<String, Uint8Array>,
   preferred_langs: &[String],
-) -> std::result::Result<String, OcrError> {
+) -> std::result::Result<(String, f32), OcrError> {
   let bridge = BRIDGE.as_ref().ok_or_else(|| {
     OcrError::ErrorWithDesc("RecognizeDocumentsRequest sidecar unavailable".into())
   })?;
@@ -131,12 +135,21 @@ pub(crate) fn perform_recognize_documents(
     CString::new(langs_joined).map_err(|e| OcrError::ErrorWithDesc(e.to_string()))?;
 
   let mut error_ptr: *mut c_char = ptr::null_mut();
+  // The Swift bridge always writes `*confidence_out` on entry (initialising it
+  // to `0.0`) so this initial value is just a placeholder for the case where
+  // dispatch itself fails before the Task runs (which it shouldn't).
+  let mut confidence: f32 = 0.0;
   let raw_ptr = unsafe {
     match image {
       Either::A(path) => {
         let c_path =
           CString::new(path.as_str()).map_err(|e| OcrError::ErrorWithDesc(e.to_string()))?;
-        (bridge.from_path)(c_path.as_ptr(), langs_cstr.as_ptr(), &mut error_ptr)
+        (bridge.from_path)(
+          c_path.as_ptr(),
+          langs_cstr.as_ptr(),
+          &mut confidence,
+          &mut error_ptr,
+        )
       }
       Either::B(buf) => {
         let data = buf.as_mut();
@@ -144,6 +157,7 @@ pub(crate) fn perform_recognize_documents(
           data.as_ptr(),
           data.len(),
           langs_cstr.as_ptr(),
+          &mut confidence,
           &mut error_ptr,
         )
       }
@@ -182,5 +196,5 @@ pub(crate) fn perform_recognize_documents(
     return Err(OcrError::NoTextRecognized);
   }
 
-  Ok(text)
+  Ok((text, confidence))
 }

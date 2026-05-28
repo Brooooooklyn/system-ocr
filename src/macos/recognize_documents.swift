@@ -21,13 +21,20 @@ import Vision
 // string leaves the recognizer to auto-detect.
 
 /// Perform document recognition on an image at the given file path.
+///
+/// `confidenceOut` is written with the mean of every `DocumentObservation`'s
+/// `confidence` value (see `DocumentObservation.confidence`, macOS 26 Vision
+/// SDK). It is initialised to `0.0` at entry so error paths never leave
+/// uninitialised memory visible to Rust.
 @_cdecl("recognize_documents_from_path")
 public func recognizeDocumentsFromPath(
   _ pathPtr: UnsafePointer<CChar>,
   _ langsPtr: UnsafePointer<CChar>?,
+  _ confidenceOut: UnsafeMutablePointer<Float>,
   _ errorOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>
 ) -> UnsafeMutablePointer<CChar>? {
   errorOut.pointee = nil
+  confidenceOut.pointee = 0.0
   guard #available(macOS 26, *) else {
     errorOut.pointee = makeCString("RecognizeDocumentsRequest requires macOS 26 or later")
     return nil
@@ -39,6 +46,7 @@ public func recognizeDocumentsFromPath(
 
   var resultPtr: UnsafeMutablePointer<CChar>? = nil
   var errorPtr: UnsafeMutablePointer<CChar>? = nil
+  var confidence: Float = 0.0
   let semaphore = DispatchSemaphore(value: 0)
 
   Task {
@@ -46,7 +54,9 @@ public func recognizeDocumentsFromPath(
     do {
       var request = RecognizeDocumentsRequest()
       applyLanguageHints(&request, langs: langs)
+      applyDocumentOptions(&request)
       let observations = try await request.perform(on: url)
+      confidence = averageConfidence(observations)
       resultPtr = makeCString(formatObservations(observations))
     } catch {
       errorPtr = makeCString(error.localizedDescription)
@@ -55,18 +65,26 @@ public func recognizeDocumentsFromPath(
 
   semaphore.wait()
   errorOut.pointee = errorPtr
+  confidenceOut.pointee = confidence
   return resultPtr
 }
 
 /// Perform document recognition on raw image bytes.
+///
+/// `confidenceOut` is written with the mean of every `DocumentObservation`'s
+/// `confidence` value (see `DocumentObservation.confidence`, macOS 26 Vision
+/// SDK). It is initialised to `0.0` at entry so error paths never leave
+/// uninitialised memory visible to Rust.
 @_cdecl("recognize_documents_from_data")
 public func recognizeDocumentsFromData(
   _ dataPtr: UnsafePointer<UInt8>,
   _ length: Int,
   _ langsPtr: UnsafePointer<CChar>?,
+  _ confidenceOut: UnsafeMutablePointer<Float>,
   _ errorOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>
 ) -> UnsafeMutablePointer<CChar>? {
   errorOut.pointee = nil
+  confidenceOut.pointee = 0.0
   guard #available(macOS 26, *) else {
     errorOut.pointee = makeCString("RecognizeDocumentsRequest requires macOS 26 or later")
     return nil
@@ -84,6 +102,7 @@ public func recognizeDocumentsFromData(
 
   var resultPtr: UnsafeMutablePointer<CChar>? = nil
   var errorPtr: UnsafeMutablePointer<CChar>? = nil
+  var confidence: Float = 0.0
   let semaphore = DispatchSemaphore(value: 0)
 
   Task {
@@ -91,7 +110,9 @@ public func recognizeDocumentsFromData(
     do {
       var request = RecognizeDocumentsRequest()
       applyLanguageHints(&request, langs: langs)
+      applyDocumentOptions(&request)
       let observations = try await request.perform(on: cgImage)
+      confidence = averageConfidence(observations)
       resultPtr = makeCString(formatObservations(observations))
     } catch {
       errorPtr = makeCString(error.localizedDescription)
@@ -100,6 +121,7 @@ public func recognizeDocumentsFromData(
 
   semaphore.wait()
   errorOut.pointee = errorPtr
+  confidenceOut.pointee = confidence
   return resultPtr
 }
 
@@ -127,6 +149,49 @@ private func applyLanguageHints(
   var opts = request.textRecognitionOptions
   opts.recognitionLanguages = langs.map { Locale.Language(identifier: $0) }
   request.textRecognitionOptions = opts
+}
+
+// MARK: - Document options
+//
+// `RecognizeDocumentsRequest` on macOS 26 ships with a default
+// `textRecognitionOptions.minimumTextHeightFraction` of `0.03125` (3.125%) —
+// roughly four times the legacy `VNRecognizeTextRequest` value used in the
+// fallback path (`0.008`). Without this override, small text (footnotes,
+// captions, table fine print) is silently dropped from the structured-document
+// transcript even though `VNRecognizeTextRequest` would have picked it up.
+// Match the legacy threshold so both code paths see the same text.
+@available(macOS 26, *)
+private func applyDocumentOptions(_ request: inout RecognizeDocumentsRequest) {
+  var opts = request.textRecognitionOptions
+  opts.minimumTextHeightFraction = 0.008
+  request.textRecognitionOptions = opts
+}
+
+// MARK: - Confidence
+
+/// Average per-line confidence across every `RecognizedTextObservation`
+/// reachable from the returned documents.
+///
+/// We deliberately aggregate at the line level (`RecognizedTextObservation`,
+/// see Vision.swiftinterface line ~1374 where `confidence: Swift.Float` is
+/// declared) rather than at `DocumentObservation.confidence` (line ~2632) —
+/// the document-level value collapses to a single number per page and on the
+/// macOS 26 SDK is typically `0.0`, whereas the line-level values are the
+/// same per-observation confidences that the legacy `VNRecognizeTextRequest`
+/// path averages in `perform_ocr_legacy`. This keeps the two paths reporting
+/// confidence values on the same scale.
+@available(macOS 26, *)
+private func averageConfidence(_ observations: [DocumentObservation]) -> Float {
+  var total: Float = 0.0
+  var count = 0
+  for obs in observations {
+    for line in obs.document.text.lines {
+      total += line.confidence
+      count += 1
+    }
+  }
+  guard count > 0 else { return 0.0 }
+  return total / Float(count)
 }
 
 // MARK: - Formatting

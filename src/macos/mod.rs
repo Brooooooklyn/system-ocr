@@ -41,24 +41,23 @@ pub(crate) fn perform_ocr(
 
   // On macOS 26+, prefer RecognizeDocumentsRequest for richer structured
   // output. The structured-document recognizer doesn't expose an accuracy
-  // knob and synthesises a hardcoded 1.0 confidence, so only take this path
-  // when the caller is happy with the default `Accurate` setting AND has not
-  // supplied explicit `preferredLangs`. Both gates are part of the docstring
-  // contract on `OcrResult::confidence`: either escape hatch routes through
-  // the legacy `VNRecognizeTextRequest` path which honours `OcrAccuracy::Fast`
-  // and surfaces averaged per-observation confidence.
+  // knob, so only take this path when the caller is happy with the default
+  // `Accurate` setting AND has not supplied explicit `preferredLangs`. Either
+  // escape hatch routes through the legacy `VNRecognizeTextRequest` path,
+  // which honours `OcrAccuracy::Fast`. Confidence is real on both paths:
+  // averaged across the observations the recognizer returned.
   #[cfg(has_recognize_documents)]
   {
-    if matches!(accuracy, OcrAccuracy::Accurate) && !explicit_langs {
-      // Confidence is hardcoded to 1.0 because RecognizeDocumentsRequest does
-      // not surface per-observation confidence scores.
-      if let Ok(text) = documents::perform_recognize_documents(&mut image, &resolved_langs) {
-        return Ok((text, 1.0));
-      }
-      // RecognizeDocumentsRequest failed (e.g. runtime < macOS 26, missing
-      // sidecar dylib, or absent Swift runtime), fall through to the legacy
-      // VNRecognizeTextRequest path.
+    if matches!(accuracy, OcrAccuracy::Accurate)
+      && !explicit_langs
+      && let Ok((text, confidence)) =
+        documents::perform_recognize_documents(&mut image, &resolved_langs)
+    {
+      return Ok((text, confidence));
     }
+    // If the structured-document path was skipped or failed (e.g. runtime
+    // < macOS 26, missing sidecar dylib, or absent Swift runtime), fall
+    // through to the legacy VNRecognizeTextRequest path below.
   }
 
   perform_ocr_legacy(image, accuracy, resolved_langs)

@@ -21,12 +21,9 @@ use windows::perform_ocr;
 #[napi(object)]
 pub struct OcrResult {
   pub text: String,
-  /// Always 1.0 on Windows. On macOS 26+, also 1.0 when the
-  /// `RecognizeDocumentsRequest` (structured-document) path is used — that
-  /// API does not surface per-observation confidence. Callers that need the
-  /// averaged `VNRecognizeTextRequest` confidence should pass an explicit
-  /// `accuracy` of `Fast` or a non-empty `preferredLangs`, which routes the
-  /// request through the legacy text-recognition path.
+  /// Always 1.0 on Windows. On macOS, the averaged per-observation confidence
+  /// returned by the Vision recognizer (either `RecognizeDocumentsRequest` on
+  /// macOS 26+ or the legacy `VNRecognizeTextRequest` path).
   pub confidence: f64,
 }
 
