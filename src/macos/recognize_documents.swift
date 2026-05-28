@@ -92,24 +92,32 @@ private func formatObservations(_ observations: [DocumentObservation]) -> String
 private func formatDocument(_ container: DocumentObservation.Container) -> String {
   var sections: [String] = []
 
-  // Collect all line transcripts from table cells to exclude from paragraphs
-  var tableCellLines: Set<String> = []
+  // Collect the per-line identities owned by table cells so we can suppress
+  // those same observations when emitting paragraphs. We key on
+  // `RecognizedTextObservation.uuid` (geometry-tied to the source observation)
+  // instead of the raw transcript — otherwise a paragraph line whose text
+  // happens to match a table cell value (a repeated label, date, status, etc.)
+  // would be silently dropped.
+  var tableCellLineIDs: Set<UUID> = []
   for table in container.tables {
     let rowCount = table.rows.count
     let colCount = table.columns.count
     for row in 0..<rowCount {
       for col in 0..<colCount {
         if let cell = table.cell(row: row, col: col) {
-          tableCellLines.insert(cell.content.text.transcript)
+          for line in cell.content.text.lines {
+            tableCellLineIDs.insert(line.uuid)
+          }
         }
       }
     }
   }
 
-  // Keep only paragraph lines whose text is NOT found in any table cell
+  // Keep only paragraph lines whose observation identity is NOT owned by any
+  // table cell.
   let nonTableParagraphs: [String] = container.paragraphs.compactMap { paragraph in
     let kept = paragraph.lines.filter { line in
-      !tableCellLines.contains(line.transcript)
+      !tableCellLineIDs.contains(line.uuid)
     }
     if kept.isEmpty { return nil }
     return kept.map { $0.transcript }.joined(separator: "\n")
