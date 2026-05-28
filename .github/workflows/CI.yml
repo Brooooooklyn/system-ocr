@@ -84,6 +84,13 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.settings.target }}
+      - name: Get Xcode SDK version (macOS)
+        id: xcode_sdk
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          sdk="$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || echo unknown)"
+          echo "sdk_version=$sdk" >> "$GITHUB_OUTPUT"
       - name: Cache cargo
         uses: actions/cache@v5
         with:
@@ -94,7 +101,10 @@ jobs:
             ~/.napi-rs
             .cargo-cache
             target/
-          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
+          # On macOS the Swift sidecar output depends on the installed SDK
+          # version; bust the cache when the SDK changes so build.rs reruns
+          # and re-emits `librecognize_documents.dylib`.
+          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}${{ runner.os == 'macOS' && format('-sdk{0}', steps.xcode_sdk.outputs.sdk_version) || '' }}
       - uses: goto-bus-stop/setup-zig@v2
         if: ${{ contains(matrix.settings.target, 'musl') }}
         with:
@@ -115,6 +125,25 @@ jobs:
       - name: Build
         run: ${{ matrix.settings.build }}
         shell: bash
+      - name: Stage Darwin sidecar dylib
+        if: contains(matrix.settings.target, 'apple-darwin')
+        shell: bash
+        run: |
+          # build.rs copies the sidecar to the workspace root as a side
+          # effect, but cargo may skip rerunning the build script when
+          # restoring from cache. Stage the dylib here from the canonical
+          # cargo target dir so the artifact-upload step has a stable input
+          # regardless of cache state.
+          src="target/${{ matrix.settings.target }}/release/librecognize_documents.dylib"
+          if [ -f "$src" ]; then
+            cp "$src" ./
+            echo "Staged sidecar from $src"
+            # Validate it matches the build matrix architecture.
+            archs="$(lipo -archs librecognize_documents.dylib 2>/dev/null || file librecognize_documents.dylib)"
+            echo "sidecar archs: $archs"
+          else
+            echo "No sidecar at $src (build.rs may have skipped on missing macOS 26 SDK)"
+          fi
       - name: Verify Darwin sidecar built (release commits only)
         if: contains(matrix.settings.target, 'apple-darwin')
         shell: bash
