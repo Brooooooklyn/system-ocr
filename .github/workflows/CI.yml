@@ -115,6 +115,25 @@ jobs:
       - name: Build
         run: ${{ matrix.settings.build }}
         shell: bash
+      - name: Verify Darwin sidecar built (release commits only)
+        if: contains(matrix.settings.target, 'apple-darwin')
+        shell: bash
+        run: |
+          # Fail the build early — not the publish — when a release commit
+          # produces no Swift sidecar. The publish job also enforces this,
+          # but discovering the gap here surfaces a missing macOS 26 SDK or
+          # Xcode toolchain immediately for the people running the build.
+          msg="$(git log -1 --pretty=%B)"
+          if ! echo "$msg" | grep -qE "^v?[0-9]+\.[0-9]+\.[0-9]+"; then
+            echo "Not a release commit; sidecar absence is acceptable."
+            exit 0
+          fi
+          if [ ! -f "librecognize_documents.dylib" ]; then
+            echo "::error::Release commit on ${{ matrix.settings.target }} produced no librecognize_documents.dylib. The runner needs macOS 26 SDK (Xcode 26+); upgrade the runner image or pin an Xcode that ships the RecognizeDocumentsRequest SDK."
+            exit 1
+          fi
+          echo "Sidecar present:"
+          ls -la librecognize_documents.dylib
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
