@@ -44,7 +44,7 @@ fn compile_swift() {
   let dylib_name = "librecognize_documents.dylib";
   let dylib_out = format!("{out_dir}/{dylib_name}");
 
-  let output = std::process::Command::new("swiftc")
+  let output = match std::process::Command::new("swiftc")
     .args([
       "-emit-library",
       "-parse-as-library",
@@ -64,7 +64,18 @@ fn compile_swift() {
       &swift_src,
     ])
     .output()
-    .expect("Failed to run swiftc. Is Xcode installed?");
+  {
+    Ok(output) => output,
+    Err(err) => {
+      // `swiftc` is not on PATH (no Xcode / no command-line tools, or some
+      // other spawn failure). The Rust addon can still build the legacy
+      // VNRecognizeTextRequest path, so warn and skip the Swift bridge.
+      eprintln!(
+        "cargo:warning=Skipping RecognizeDocumentsRequest Swift bridge: failed to spawn swiftc ({err}). Install Xcode or the command-line tools to enable the macOS 26+ structured-document path."
+      );
+      return;
+    }
+  };
 
   if !output.status.success() {
     let stderr = String::from_utf8_lossy(&output.stderr);

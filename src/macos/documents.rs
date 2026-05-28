@@ -26,8 +26,21 @@ struct DlInfo {
   dli_saddr: *mut c_void,
 }
 
-type FromPathFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
-type FromDataFn = unsafe extern "C" fn(*const u8, usize) -> *mut c_char;
+// New ABI: each entry point takes an OUT pointer for an error string and
+// returns either a non-NULL malloc'd C-string on success (empty string means
+// "no text recognized") or NULL on failure, in which case `*error_out` will
+// point to a malloc'd error description.
+type FromPathFn = unsafe extern "C" fn(
+  path: *const c_char,
+  langs: *const c_char,
+  error_out: *mut *mut c_char,
+) -> *mut c_char;
+type FromDataFn = unsafe extern "C" fn(
+  data: *const u8,
+  len: usize,
+  langs: *const c_char,
+  error_out: *mut *mut c_char,
+) -> *mut c_char;
 type FreeFn = unsafe extern "C" fn(*mut c_char);
 
 struct Bridge {
@@ -104,37 +117,65 @@ fn sidecar_path() -> Option<PathBuf> {
 
 pub(crate) fn perform_recognize_documents(
   image: &mut Either<String, Uint8Array>,
+  preferred_langs: &[String],
 ) -> std::result::Result<String, OcrError> {
   let bridge = BRIDGE.as_ref().ok_or_else(|| {
     OcrError::ErrorWithDesc("RecognizeDocumentsRequest sidecar unavailable".into())
   })?;
 
+  // Encode the language hints as a comma-separated UTF-8 string. The Swift
+  // bridge will split on `,` and apply them via
+  // `RecognizeDocumentsRequest.textRecognitionOptions.recognitionLanguages`.
+  let langs_joined = preferred_langs.join(",");
+  let langs_cstr =
+    CString::new(langs_joined).map_err(|e| OcrError::ErrorWithDesc(e.to_string()))?;
+
+  let mut error_ptr: *mut c_char = ptr::null_mut();
   let raw_ptr = unsafe {
     match image {
       Either::A(path) => {
         let c_path =
           CString::new(path.as_str()).map_err(|e| OcrError::ErrorWithDesc(e.to_string()))?;
-        (bridge.from_path)(c_path.as_ptr())
+        (bridge.from_path)(c_path.as_ptr(), langs_cstr.as_ptr(), &mut error_ptr)
       }
       Either::B(buf) => {
         let data = buf.as_mut();
-        (bridge.from_data)(data.as_ptr(), data.len())
+        (bridge.from_data)(
+          data.as_ptr(),
+          data.len(),
+          langs_cstr.as_ptr(),
+          &mut error_ptr,
+        )
       }
     }
   };
 
   if raw_ptr.is_null() {
-    return Err(OcrError::ErrorWithDesc("Swift bridge returned null".into()));
+    // Failure: error_ptr should be non-null with a description.
+    let msg = if error_ptr.is_null() {
+      "Swift bridge returned null without an error description".to_string()
+    } else {
+      // SAFETY: error_ptr is a malloc'd C string owned by the Swift bridge.
+      let s = unsafe { CStr::from_ptr(error_ptr) }
+        .to_string_lossy()
+        .into_owned();
+      unsafe { (bridge.free)(error_ptr) };
+      s
+    };
+    return Err(OcrError::ErrorWithDesc(msg));
   }
 
+  // Success path: take ownership of the text, then free it.
   let text = unsafe {
     let s = CStr::from_ptr(raw_ptr).to_string_lossy().into_owned();
     (bridge.free)(raw_ptr);
     s
   };
 
-  if let Some(err) = text.strip_prefix("ERROR:") {
-    return Err(OcrError::ErrorWithDesc(err.to_owned()));
+  // The bridge may also (defensively) set an error string even on success; if
+  // so, free it but prefer the recognized text.
+  if !error_ptr.is_null() {
+    unsafe { (bridge.free)(error_ptr) };
   }
 
   if text.trim().is_empty() {

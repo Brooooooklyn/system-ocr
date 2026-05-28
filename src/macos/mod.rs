@@ -23,17 +23,26 @@ pub(crate) fn perform_ocr(
   accuracy: OcrAccuracy,
   preferred_langs: Vec<String>,
 ) -> std::result::Result<(String, f32), OcrError> {
-  // On macOS 26+, prefer RecognizeDocumentsRequest for richer structured output,
-  // but only when the caller hasn't customised accuracy or preferred languages —
-  // RecognizeDocumentsRequest doesn't expose those knobs, so honour the legacy
-  // path whenever the caller asked for something specific.
+  // Resolve the documented default once so both code paths apply the same
+  // language hint policy: callers who don't pass `preferredLangs` get
+  // `["en-US"]` as advertised in the public docs.
+  let resolved_langs = if preferred_langs.is_empty() {
+    vec!["en-US".to_string()]
+  } else {
+    preferred_langs
+  };
+
+  // On macOS 26+, prefer RecognizeDocumentsRequest for richer structured
+  // output. The structured-document recognizer doesn't expose an accuracy
+  // knob, so only take this path when the caller is happy with the default
+  // `Accurate` setting; otherwise fall through to the legacy
+  // VNRecognizeTextRequest path which honours `OcrAccuracy::Fast`.
   #[cfg(has_recognize_documents)]
   {
-    let opts_are_default = matches!(accuracy, OcrAccuracy::Accurate) && preferred_langs.is_empty();
-    if opts_are_default {
+    if matches!(accuracy, OcrAccuracy::Accurate) {
       // Confidence is hardcoded to 1.0 because RecognizeDocumentsRequest does
       // not surface per-observation confidence scores.
-      if let Ok(text) = documents::perform_recognize_documents(&mut image) {
+      if let Ok(text) = documents::perform_recognize_documents(&mut image, &resolved_langs) {
         return Ok((text, 1.0));
       }
       // RecognizeDocumentsRequest failed (e.g. runtime < macOS 26, missing
@@ -42,7 +51,7 @@ pub(crate) fn perform_ocr(
     }
   }
 
-  perform_ocr_legacy(image, accuracy, preferred_langs)
+  perform_ocr_legacy(image, accuracy, resolved_langs)
 }
 
 fn perform_ocr_legacy(
@@ -90,14 +99,12 @@ fn perform_ocr_legacy(
       let request = VNRecognizeTextRequest::init(VNRecognizeTextRequest::alloc());
       request.setRecognitionLevel(accuracy.into());
 
-      let langs = if preferred_langs.is_empty() {
-        vec![NSString::from_str("en-US")]
-      } else {
-        preferred_langs
-          .iter()
-          .map(|lang| NSString::from_str(lang))
-          .collect::<Vec<Retained<NSString>>>()
-      };
+      // `preferred_langs` is guaranteed non-empty here: `perform_ocr` resolves
+      // the documented `["en-US"]` default before dispatching.
+      let langs = preferred_langs
+        .iter()
+        .map(|lang| NSString::from_str(lang))
+        .collect::<Vec<Retained<NSString>>>();
       let preferred_langs_arr: Retained<NSArray<NSString>> = NSArray::from_retained_slice(&langs);
       request.setRecognitionLanguages(&preferred_langs_arr);
       request.setUsesLanguageCorrection(true);
