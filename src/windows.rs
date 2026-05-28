@@ -27,9 +27,9 @@ impl From<HRESULT> for OcrError {
 pub(crate) fn perform_ocr(
   image: Either<String, Uint8Array>,
   _accuracy: OcrAccuracy,
-  preferred_langs: Option<Vec<String>>,
+  preferred_langs: Vec<String>,
 ) -> std::result::Result<(String, f32), OcrError> {
-  perform_ocr_win(image, _accuracy, preferred_langs.unwrap_or_default())
+  perform_ocr_win(image, _accuracy, preferred_langs)
     .map_err(|e| OcrError::WindowsError(e.to_string()))
 }
 

@@ -83,11 +83,20 @@ fn take_dlerror() -> Option<String> {
 }
 
 fn load_bridge() -> Option<Bridge> {
+  // Skip on macOS < 26 BEFORE touching the sidecar. The Swift entry points
+  // weak-link Vision symbols and dyld will happily load the dylib on older
+  // systems, but every call would return NULL with "requires macOS 26 or
+  // later" — that would be treated as a sidecar-present runtime failure and
+  // spam stderr on every call. Cached `None` here means pre-26 systems pay
+  // the version check once and then take the legacy path silently.
+  if !macos_supports_documents() {
+    return None;
+  }
+
   let dylib_path = sidecar_path()?;
 
-  // "File not present" is the expected case on systems shipped before the
-  // structured-document API (or in release builds where the sidecar was
-  // intentionally omitted — e.g. non-Darwin targets via the build-time gate).
+  // "File not present" is the expected case on release builds where the
+  // sidecar was intentionally omitted (e.g. the build-time gate skipped it).
   // Fall through silently; the caller will treat this as
   // `DocumentsSidecarUnavailable` and route to the legacy OCR path.
   if !dylib_path.exists() {
@@ -147,6 +156,19 @@ fn load_bridge() -> Option<Bridge> {
     from_data: unsafe { std::mem::transmute::<*mut c_void, FromDataFn>(from_data) },
     free: unsafe { std::mem::transmute::<*mut c_void, FreeFn>(free) },
   })
+}
+
+/// True when the current process is running on macOS 26 or later — the
+/// minimum runtime for `RecognizeDocumentsRequest`.
+fn macos_supports_documents() -> bool {
+  use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
+  let info = NSProcessInfo::processInfo();
+  let required = NSOperatingSystemVersion {
+    majorVersion: 26,
+    minorVersion: 0,
+    patchVersion: 0,
+  };
+  info.isOperatingSystemAtLeastVersion(required)
 }
 
 /// Locate the sidecar dylib by asking `dladdr` for the on-disk path of the

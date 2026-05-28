@@ -21,34 +21,25 @@ pub(crate) fn perform_ocr(
     Uint8Array,
   >,
   accuracy: OcrAccuracy,
-  preferred_langs: Option<Vec<String>>,
+  preferred_langs: Vec<String>,
 ) -> std::result::Result<(String, f32), OcrError> {
-  // Distinguish "caller passed no `preferredLangs`" from "caller passed an
-  // explicit list" BEFORE resolving the default. The presence of explicit
-  // language hints is one of the documented escape hatches that forces the
-  // legacy `VNRecognizeTextRequest` path so callers can recover the averaged
-  // per-observation confidence score.
-  let explicit_langs = preferred_langs.is_some();
   // Resolve the documented default once so both code paths apply the same
   // language hint policy: callers who don't pass `preferredLangs` get
-  // `["en-US"]` as advertised in the public docs. Treat an explicit empty
-  // list the same way (no useful hint, but keeps the explicit-langs gate
-  // intact since the caller still chose to opt out of the documents path).
-  let resolved_langs = match preferred_langs {
-    Some(langs) if !langs.is_empty() => langs,
-    _ => vec!["en-US".to_string()],
+  // `["en-US"]` as advertised in the public docs.
+  let resolved_langs = if preferred_langs.is_empty() {
+    vec!["en-US".to_string()]
+  } else {
+    preferred_langs
   };
 
   // On macOS 26+, prefer RecognizeDocumentsRequest for richer structured
-  // output. The structured-document recognizer doesn't expose an accuracy
-  // knob, so only take this path when the caller is happy with the default
-  // `Accurate` setting AND has not supplied explicit `preferredLangs`. Either
-  // escape hatch routes through the legacy `VNRecognizeTextRequest` path,
-  // which honours `OcrAccuracy::Fast`. Confidence is real on both paths:
-  // averaged across the observations the recognizer returned.
+  // output. The structured-document recognizer accepts language hints and
+  // reports per-observation confidence (averaged in Swift), so the only
+  // option it can't honour is `OcrAccuracy::Fast` — fall through to the
+  // legacy `VNRecognizeTextRequest` path in that case.
   #[cfg(has_recognize_documents)]
   {
-    if matches!(accuracy, OcrAccuracy::Accurate) && !explicit_langs {
+    if matches!(accuracy, OcrAccuracy::Accurate) {
       // SYSTEM_OCR_REQUIRE_DOCUMENTS=1 makes structured-document failures
       // hard errors instead of silently falling through to legacy OCR. This
       // is an internal knob for tests and CI assertions on macOS 26 runners
