@@ -1,0 +1,5 @@
+minimumReleaseAgeExclude:
+  - oxlint
+  - '@napi-rs/*'
+  - '@oxlint/*'
+  - '@oxc-node/*'
