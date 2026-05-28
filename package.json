@@ -2,54 +2,43 @@
   "name": "@napi-rs/system-ocr",
   "version": "1.0.2",
   "description": "OCR via system provided API",
-  "main": "index.js",
-  "types": "index.d.ts",
-  "browser": "browser.js",
-  "repository": {
-    "url": "git+ssh://git@github.com/Brooooooklyn/system-ocr.git",
-    "type": "git"
-  },
-  "license": "MIT",
   "keywords": [
-    "napi-rs",
-    "NAPI",
     "N-API",
+    "NAPI",
     "Rust",
+    "media-ocr",
+    "napi-rs",
     "node-addon",
     "node-addon-api",
     "ocr",
-    "visionkit",
-    "media-ocr"
+    "visionkit"
   ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/Brooooooklyn/system-ocr.git"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/Brooooooklyn"
+  },
   "files": [
     "index.d.ts",
     "index.js"
   ],
-  "napi": {
-    "binaryName": "system-ocr",
-    "targets": [
-      "x86_64-apple-darwin",
-      "aarch64-apple-darwin",
-      "x86_64-pc-windows-msvc",
-      "aarch64-pc-windows-msvc"
-    ],
-    "constEnum": false,
-    "packageName": "@napi-rs/system-ocr"
-  },
-  "engines": {
-    "node": ">= 10"
-  },
+  "main": "index.js",
+  "browser": "browser.js",
+  "types": "index.d.ts",
   "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "artifacts": "napi artifacts",
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
-    "format": "run-p format:prettier format:rs format:toml",
-    "format:prettier": "prettier . -w",
-    "format:toml": "taplo format",
+    "format": "run-p format:source format:rs",
+    "format:source": "oxfmt",
     "format:rs": "cargo fmt",
     "lint": "oxlint",
     "prepublishOnly": "napi prepublish -t npm",
@@ -60,52 +49,51 @@
     "@inquirer/prompts": "^8.0.0",
     "@napi-rs/cli": "3.6.2",
     "@oxc-node/core": "^0.1.0",
-    "@taplo/cli": "^0.7.0",
     "@types/node": "^24.1.0",
     "ava": "^8.0.0",
     "chalk": "^5.4.1",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.0",
     "npm-run-all2": "^8.0.4",
+    "oxfmt": "^0.52.0",
     "oxlint": "^1.8.0",
-    "prettier": "^3.6.2",
     "typescript": "^6.0.0"
   },
   "lint-staged": {
     "*.@(js|ts|tsx)": [
       "oxlint --fix"
     ],
-    "*.@(js|ts|tsx|yml|yaml|md|json)": [
-      "prettier --write"
-    ],
-    "*.toml": [
-      "taplo format"
+    "*.@(js|ts|tsx|yml|yaml|md|json|toml)": [
+      "oxfmt"
+    ]
+  },
+  "napi": {
+    "binaryName": "system-ocr",
+    "constEnum": false,
+    "packageName": "@napi-rs/system-ocr",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
     ]
   },
   "ava": {
-    "extensions": [
-      "ts"
-    ],
-    "timeout": "2m",
-    "workerThreads": false,
     "environmentVariables": {
       "TS_NODE_PROJECT": "./tsconfig.json"
     },
+    "extensions": [
+      "ts"
+    ],
     "nodeArguments": [
       "--import",
       "@oxc-node/core/register"
-    ]
+    ],
+    "timeout": "2m",
+    "workerThreads": false
   },
-  "prettier": {
-    "printWidth": 120,
-    "semi": false,
-    "trailingComma": "all",
-    "singleQuote": true,
-    "arrowParens": "always"
-  },
-  "funding": {
-    "type": "github",
-    "url": "https://github.com/sponsors/Brooooooklyn"
+  "engines": {
+    "node": ">= 10"
   },
   "packageManager": "pnpm@11.1.3"
 }

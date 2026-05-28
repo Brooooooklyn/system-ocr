@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 120,
+  "semi": false,
+  "trailingComma": "all",
+  "singleQuote": true,
+  "arrowParens": "always",
+  "ignorePatterns": ["target", ".yarn", "/*.js", "/*.mjs", "/*.cjs", "/index.js", "index.d.ts", "pnpm-lock.yaml"]
+}
