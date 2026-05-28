@@ -34,18 +34,33 @@ fn compile_swift() {
     std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "11.0".to_string());
   let target = format!("{target_arch}-apple-macosx{deployment_target}");
 
-  let obj_path = format!("{out_dir}/recognize_documents.o");
+  // Build the Swift bridge as a standalone dylib. It is NOT linked into the
+  // main `.node` addon — that way the addon stays free of Swift runtime
+  // dependencies and remains loadable on older macOS versions (< 10.14.4)
+  // which do not ship `/usr/lib/swift`. At runtime, Rust will `dlopen` this
+  // sidecar when (and only when) the user is on macOS 26+ and the file is
+  // present. If the open fails for any reason we fall back to the legacy
+  // VNRecognizeTextRequest path.
+  let dylib_name = "librecognize_documents.dylib";
+  let dylib_out = format!("{out_dir}/{dylib_name}");
 
-  // Compile Swift source to object file
   let output = std::process::Command::new("swiftc")
     .args([
-      "-emit-object",
+      "-emit-library",
       "-parse-as-library",
       "-whole-module-optimization",
       "-target",
       &target,
+      // Set the install name to @loader_path so consumers of the dylib can
+      // discover it via the directory of whoever loaded them. We always
+      // dlopen by absolute path at runtime so this is mostly documentation,
+      // but it keeps the dylib relocatable.
+      "-Xlinker",
+      "-install_name",
+      "-Xlinker",
+      &format!("@loader_path/{dylib_name}"),
       "-o",
-      &obj_path,
+      &dylib_out,
       &swift_src,
     ])
     .output()
@@ -63,53 +78,59 @@ fn compile_swift() {
     panic!("Swift compilation failed:\n{stderr}");
   }
 
-  // Create static library from the object file
-  let lib_path = format!("{out_dir}/librecognize_documents.a");
-  let ar_output = std::process::Command::new("ar")
-    .args(["crs", &lib_path, &obj_path])
-    .output()
-    .expect("Failed to run ar");
-
-  if !ar_output.status.success() {
-    panic!("ar failed: {}", String::from_utf8_lossy(&ar_output.stderr));
+  // Copy the freshly built dylib next to the `.node` so it can be discovered
+  // via `dladdr` at runtime. The cargo target directory is the great-grand-
+  // parent of `OUT_DIR` (OUT_DIR = $target/$profile/build/<pkg-hash>/out).
+  let out_path = std::path::PathBuf::from(&out_dir);
+  if let Some(target_root) = out_path
+    .ancestors()
+    .nth(3)
+    .map(std::path::Path::to_path_buf)
+  {
+    let dest = target_root.join(dylib_name);
+    if let Err(err) = std::fs::copy(&dylib_out, &dest) {
+      eprintln!(
+        "cargo:warning=Failed to copy {dylib_name} to {}: {err}",
+        dest.display()
+      );
+    }
+    // Also drop a copy in the workspace root so napi-rs's post-build step
+    // (which moves the `.node` next to package.json) finds the sidecar in
+    // the same directory. Build scripts cannot reliably know the final
+    // destination, so we mirror napi-rs's convention of placing artifacts
+    // beside CARGO_MANIFEST_DIR.
+    let manifest_dest = std::path::PathBuf::from(&manifest_dir).join(dylib_name);
+    if let Err(err) = std::fs::copy(&dylib_out, &manifest_dest) {
+      eprintln!(
+        "cargo:warning=Failed to copy {dylib_name} to {}: {err}",
+        manifest_dest.display()
+      );
+    }
   }
 
-  // Tell Cargo to link the static library
-  println!("cargo:rustc-link-search=native={out_dir}");
-  println!("cargo:rustc-link-lib=static=recognize_documents");
+  // NOTE: PACKAGING — `napi prepublish` currently only ships `.node` (and
+  // `.wasm`) artifacts when assembling per-platform npm packages. The Darwin
+  // packages (`@napi-rs/system-ocr-darwin-arm64` and `-darwin-x64`) need to
+  // include the sidecar `librecognize_documents.dylib` next to the `.node`
+  // for the runtime `dladdr`-based discovery in `src/macos/documents.rs` to
+  // succeed. Possible paths:
+  //   1. Add a `files`/post-build hook in CI that copies the dylib into the
+  //      generated `npm/darwin-arm64` and `npm/darwin-x64` directories before
+  //      `npm publish`.
+  //   2. Wait for/contribute napi-rs CLI support for additional binary
+  //      artifacts in the `napi` block of package.json.
+  // This change is out of scope for this iteration — the local build path is
+  // the priority. Without the sidecar, runtime simply falls back to the
+  // legacy VNRecognizeTextRequest path (which is the desired behaviour on
+  // older macOS).
+  //
+  // Deliberately NO link directives here. The main `.node` addon must not
+  // depend on the Swift bridge, Swift runtime, or the Apple frameworks that
+  // only the bridge uses (Vision/CoreGraphics/Foundation/ImageIO). Those
+  // dependencies travel with the sidecar dylib.
 
-  // Link Apple frameworks used by the Swift code
-  println!("cargo:rustc-link-lib=framework=Vision");
-  println!("cargo:rustc-link-lib=framework=CoreGraphics");
-  println!("cargo:rustc-link-lib=framework=Foundation");
-  println!("cargo:rustc-link-lib=framework=ImageIO");
-
-  // Link Swift runtime (ships with macOS)
-  let toolchain_output = std::process::Command::new("xcrun")
-    .args(["--toolchain", "default", "--find", "swiftc"])
-    .output()
-    .expect("xcrun failed");
-  let swiftc_path = String::from_utf8(toolchain_output.stdout)
-    .unwrap()
-    .trim()
-    .to_string();
-  let toolchain_lib = std::path::Path::new(&swiftc_path)
-    .parent()
-    .unwrap()
-    .parent()
-    .unwrap()
-    .join("lib/swift/macosx");
-  println!("cargo:rustc-link-search=native={}", toolchain_lib.display());
-  println!("cargo:rustc-link-search=native=/usr/lib/swift");
-
-  // Set rpath so the dylib can find Swift runtime libraries at load time
-  println!("cargo:rustc-cdylib-link-arg=-Wl,-rpath,/usr/lib/swift");
-  println!(
-    "cargo:rustc-cdylib-link-arg=-Wl,-rpath,{}",
-    toolchain_lib.display()
-  );
-
-  // Set cfg flag so Rust code knows the Swift bridge is available
+  // Set cfg flag so Rust code knows the sidecar was produced at build time.
+  // Runtime presence is still verified via dlopen.
   println!("cargo:rustc-cfg=has_recognize_documents");
 
   println!("cargo:rerun-if-changed=src/macos/recognize_documents.swift");

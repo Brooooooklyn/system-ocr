@@ -36,7 +36,9 @@ pub(crate) fn perform_ocr(
       if let Ok(text) = documents::perform_recognize_documents(&mut image) {
         return Ok((text, 1.0));
       }
-      // RecognizeDocumentsRequest failed (e.g. runtime < macOS 26), fall through.
+      // RecognizeDocumentsRequest failed (e.g. runtime < macOS 26, missing
+      // sidecar dylib, or absent Swift runtime), fall through to the legacy
+      // VNRecognizeTextRequest path.
     }
   }
 
