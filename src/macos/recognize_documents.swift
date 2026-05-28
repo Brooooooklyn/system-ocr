@@ -5,6 +5,18 @@ import Vision
 
 // MARK: - C-compatible entry points
 //
+// ABI version. Returned by `recognize_documents_abi_version` so the Rust
+// loader can refuse to call into a sidecar whose `@_cdecl` signatures don't
+// match what it was compiled against (stale dylib left over from a partial
+// upgrade, cache restore, manual bundle, etc.). BUMP whenever any other
+// `@_cdecl` in this file changes signature (parameter count, parameter
+// types, return type). Pair every bump with a matching bump of
+// `EXPECTED_ABI_VERSION` in `src/macos/documents.rs`.
+@_cdecl("recognize_documents_abi_version")
+public func recognizeDocumentsAbiVersion() -> UInt32 {
+  return 1
+}
+
 // ABI contract (shared by both `from_path` and `from_data` variants):
 //   - Returns a non-NULL malloc'd C-string on success (the OCR text).
 //     - An empty string signals "no text recognized"; callers should treat

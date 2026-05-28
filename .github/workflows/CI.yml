@@ -243,6 +243,53 @@ jobs:
         shell: bash
       - name: Test bindings
         run: pnpm test
+      - name: Smoke-test sidecar (macOS 26+ only)
+        if: contains(matrix.settings.target, 'apple-darwin')
+        shell: bash
+        run: |
+          # `pnpm test` above runs in non-strict mode, so a broken sidecar
+          # that errors on every call would silently mask via legacy
+          # fallback. Force the strict path here so the sidecar's runtime
+          # success is asserted end-to-end whenever the runner actually has
+          # the macOS 26 SDK that ships `RecognizeDocumentsRequest`.
+          sdk="$(xcrun --sdk macosx --show-sdk-version 2>/dev/null || echo unknown)"
+          case "$sdk" in
+            26.*) ;;
+            *)
+              echo "Skipping sidecar smoke (SDK $sdk has no RecognizeDocumentsRequest support)"
+              exit 0
+              ;;
+          esac
+          # Map cargo target -> napi-rs platform suffix used in the .node
+          # filename emitted by `napi build --target <cargo-target>`.
+          case "${{ matrix.settings.target }}" in
+            aarch64-apple-darwin) node_file="system-ocr.darwin-arm64.node" ;;
+            x86_64-apple-darwin)  node_file="system-ocr.darwin-x64.node" ;;
+            *) echo "::error::Unhandled darwin target ${{ matrix.settings.target }}"; exit 1 ;;
+          esac
+          if [ ! -f "$node_file" ]; then
+            echo "::error::Expected $node_file in workspace root after artifact download"
+            ls -la
+            exit 1
+          fi
+          if [ ! -f "librecognize_documents.dylib" ]; then
+            echo "::error::Expected sidecar dylib next to $node_file after artifact download"
+            ls -la
+            exit 1
+          fi
+          SYSTEM_OCR_REQUIRE_DOCUMENTS=1 node -e "
+            const ocr = require('./${node_file}');
+            ocr.recognize('./example.png').then(r => {
+              if (!r.text || r.text.length < 10) {
+                console.error('Sidecar returned suspiciously short text:', JSON.stringify(r));
+                process.exit(1);
+              }
+              console.log('Sidecar smoke OK:', r.text.length, 'chars at', r.confidence.toFixed(3), 'confidence');
+            }, e => {
+              console.error('Sidecar smoke FAILED:', e.message);
+              process.exit(1);
+            });
+          "
   publish:
     name: Publish
     runs-on: ubuntu-latest

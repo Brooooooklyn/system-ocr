@@ -12,6 +12,16 @@ use crate::OcrError;
 const RTLD_NOW: c_int = 2;
 const RTLD_LOCAL: c_int = 4;
 
+// Expected ABI version exported by the Swift sidecar. Must match the value
+// returned by `recognize_documents_abi_version` in
+// `src/macos/recognize_documents.swift`. BUMP whenever any of the
+// operational `@_cdecl` signatures (`recognize_documents_from_path`,
+// `recognize_documents_from_data`, `free_recognize_result`) change and pair
+// every bump with a matching bump of the Swift function's return value. If
+// the values disagree at runtime, `load_bridge` refuses to use the sidecar
+// (and the caller falls through to the legacy path in non-strict mode).
+const EXPECTED_ABI_VERSION: u32 = 1;
+
 unsafe extern "C" {
   fn dlopen(filename: *const c_char, flag: c_int) -> *mut c_void;
   fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
@@ -47,6 +57,7 @@ type FromDataFn = unsafe extern "C" fn(
   error_out: *mut *mut c_char,
 ) -> *mut c_char;
 type FreeFn = unsafe extern "C" fn(*mut c_char);
+type AbiVersionFn = unsafe extern "C" fn() -> u32;
 
 struct Bridge {
   from_path: FromPathFn,
@@ -125,6 +136,40 @@ fn load_bridge() -> Option<Bridge> {
   }
   // We intentionally never `dlclose` — the dylib stays loaded for the
   // remainder of the addon's lifetime.
+
+  // ABI version handshake. Done BEFORE resolving the three operational
+  // symbols so a sidecar built against a different FFI shape (cache restore,
+  // stale manual bundle, partial upgrade) is rejected before any `transmute`
+  // could materialise a function pointer with the wrong signature and
+  // corrupt memory on first call.
+  let abi_sym = CString::new("recognize_documents_abi_version").ok()?;
+  let _ = take_dlerror();
+  // SAFETY: `handle` is a valid dlopen handle; `abi_sym` is a valid
+  // NUL-terminated string.
+  let abi_ptr = unsafe { dlsym(handle, abi_sym.as_ptr()) };
+  if abi_ptr.is_null() {
+    let msg = take_dlerror().unwrap_or_else(|| "abi-version symbol missing".to_string());
+    eprintln!(
+      "system-ocr: sidecar at {} missing recognize_documents_abi_version: {msg}",
+      dylib_path.display()
+    );
+    return None;
+  }
+  // SAFETY: The Swift `@_cdecl("recognize_documents_abi_version")` entry
+  // point matches this signature (`() -> u32`).
+  let abi_fn: AbiVersionFn = unsafe { std::mem::transmute::<*mut c_void, AbiVersionFn>(abi_ptr) };
+  // SAFETY: `abi_fn` is a freshly-resolved Swift `@_cdecl` taking no
+  // arguments; calling it is sound.
+  let actual = unsafe { abi_fn() };
+  if actual != EXPECTED_ABI_VERSION {
+    eprintln!(
+      "system-ocr: sidecar at {} ABI version {} doesn't match expected {} — refusing to use",
+      dylib_path.display(),
+      actual,
+      EXPECTED_ABI_VERSION
+    );
+    return None;
+  }
 
   let from_path_sym = CString::new("recognize_documents_from_path").ok()?;
   let from_data_sym = CString::new("recognize_documents_from_data").ok()?;
