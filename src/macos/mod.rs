@@ -21,25 +21,35 @@ pub(crate) fn perform_ocr(
     Uint8Array,
   >,
   accuracy: OcrAccuracy,
-  preferred_langs: Vec<String>,
+  preferred_langs: Option<Vec<String>>,
 ) -> std::result::Result<(String, f32), OcrError> {
+  // Distinguish "caller passed no `preferredLangs`" from "caller passed an
+  // explicit list" BEFORE resolving the default. The presence of explicit
+  // language hints is one of the documented escape hatches that forces the
+  // legacy `VNRecognizeTextRequest` path so callers can recover the averaged
+  // per-observation confidence score.
+  let explicit_langs = preferred_langs.is_some();
   // Resolve the documented default once so both code paths apply the same
   // language hint policy: callers who don't pass `preferredLangs` get
-  // `["en-US"]` as advertised in the public docs.
-  let resolved_langs = if preferred_langs.is_empty() {
-    vec!["en-US".to_string()]
-  } else {
-    preferred_langs
+  // `["en-US"]` as advertised in the public docs. Treat an explicit empty
+  // list the same way (no useful hint, but keeps the explicit-langs gate
+  // intact since the caller still chose to opt out of the documents path).
+  let resolved_langs = match preferred_langs {
+    Some(langs) if !langs.is_empty() => langs,
+    _ => vec!["en-US".to_string()],
   };
 
   // On macOS 26+, prefer RecognizeDocumentsRequest for richer structured
   // output. The structured-document recognizer doesn't expose an accuracy
-  // knob, so only take this path when the caller is happy with the default
-  // `Accurate` setting; otherwise fall through to the legacy
-  // VNRecognizeTextRequest path which honours `OcrAccuracy::Fast`.
+  // knob and synthesises a hardcoded 1.0 confidence, so only take this path
+  // when the caller is happy with the default `Accurate` setting AND has not
+  // supplied explicit `preferredLangs`. Both gates are part of the docstring
+  // contract on `OcrResult::confidence`: either escape hatch routes through
+  // the legacy `VNRecognizeTextRequest` path which honours `OcrAccuracy::Fast`
+  // and surfaces averaged per-observation confidence.
   #[cfg(has_recognize_documents)]
   {
-    if matches!(accuracy, OcrAccuracy::Accurate) {
+    if matches!(accuracy, OcrAccuracy::Accurate) && !explicit_langs {
       // Confidence is hardcoded to 1.0 because RecognizeDocumentsRequest does
       // not surface per-observation confidence scores.
       if let Ok(text) = documents::perform_recognize_documents(&mut image, &resolved_langs) {

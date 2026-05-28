@@ -72,7 +72,7 @@ impl Task for RecognizeTask {
     let (text, confidence) = perform_ocr(
       mem::replace(&mut self.image, Either::A(String::new())),
       self.accuracy,
-      self.preferred_langs.take().unwrap_or_default(),
+      self.preferred_langs.take(),
     )
     .map_err(anyhow::Error::from)?;
     Ok(OcrResult {

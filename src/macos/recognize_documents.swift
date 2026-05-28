@@ -138,52 +138,144 @@ private func formatObservations(_ observations: [DocumentObservation]) -> String
 
 @available(macOS 26, *)
 private func formatDocument(_ container: DocumentObservation.Container) -> String {
+  // Render every text surface that `DocumentObservation.Container` exposes —
+  // title, paragraphs, lists, tables — while keying dedup on
+  // `RecognizedTextObservation.uuid` so that two distinct observations whose
+  // transcripts happen to match (a repeated label, status, date, etc.) are
+  // not silently dropped.
   var sections: [String] = []
+  var consumedLineIDs: Set<UUID> = []
 
-  // Collect the per-line identities owned by table cells so we can suppress
-  // those same observations when emitting paragraphs. We key on
-  // `RecognizedTextObservation.uuid` (geometry-tied to the source observation)
-  // instead of the raw transcript — otherwise a paragraph line whose text
-  // happens to match a table cell value (a repeated label, date, status, etc.)
-  // would be silently dropped.
-  var tableCellLineIDs: Set<UUID> = []
+  // 1) Title (optional). When present, suppress the same observations from
+  //    later paragraph emission so we don't print them twice.
+  if let title = container.title {
+    let titleText = title.transcript
+    if !titleText.isEmpty {
+      sections.append(titleText)
+    }
+    for line in title.lines {
+      consumedLineIDs.insert(line.uuid)
+    }
+  }
+
+  // 2) Tables — pre-collect every line owned by any cell's nested container
+  //    so paragraph dedup is honoured. Tables themselves are appended after
+  //    the paragraph/list sections so the prose flows naturally.
+  var tableSections: [String] = []
+  for table in container.tables {
+    collectContainerLineIDs(table.cellsContainerLineIDs, into: &consumedLineIDs)
+    let rendered = formatTable(table)
+    if !rendered.isEmpty {
+      tableSections.append(rendered)
+    }
+  }
+
+  // 3) Lists — collect every line owned by any item's nested container, then
+  //    render the list using each item's marker + text. We use
+  //    `Container.text.transcript` of the item content so that nested
+  //    paragraphs/lines flow as a single string per item.
+  var listSections: [String] = []
+  for list in container.lists {
+    var lines: [String] = []
+    for item in list.items {
+      collectContainerLineIDs(allLineIDs(in: item.content), into: &consumedLineIDs)
+      let body = item.itemString.isEmpty ? item.content.text.transcript : item.itemString
+      let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmedBody.isEmpty { continue }
+      let marker = item.markerString.trimmingCharacters(in: .whitespacesAndNewlines)
+      if marker.isEmpty {
+        lines.append(trimmedBody)
+      } else {
+        lines.append("\(marker) \(trimmedBody)")
+      }
+    }
+    if !lines.isEmpty {
+      listSections.append(lines.joined(separator: "\n"))
+    }
+  }
+
+  // 4) Paragraphs (skipping any line already emitted via title/table/list).
+  let paragraphSections: [String] = container.paragraphs.compactMap { paragraph in
+    let kept = paragraph.lines.filter { !consumedLineIDs.contains($0.uuid) }
+    if kept.isEmpty { return nil }
+    for line in kept {
+      consumedLineIDs.insert(line.uuid)
+    }
+    return kept.map { $0.transcript }.joined(separator: "\n")
+  }
+  if !paragraphSections.isEmpty {
+    sections.append(paragraphSections.joined(separator: "\n\n"))
+  }
+
+  // 5) Lists, then tables — keeps structured artefacts at the end of the
+  //    transcript where they're easy to spot.
+  sections.append(contentsOf: listSections)
+  sections.append(contentsOf: tableSections)
+
+  // 6) Safety net: append any observation surfaced only by the top-level
+  //    `container.text.lines` and not yet rendered by the structured paths
+  //    above. Vision occasionally surfaces stray lines (captions, footnotes,
+  //    etc.) that don't belong to a paragraph/list/table — without this
+  //    fallback they would be dropped.
+  let leftover = container.text.lines.filter { !consumedLineIDs.contains($0.uuid) }
+  if !leftover.isEmpty {
+    sections.append(leftover.map { $0.transcript }.joined(separator: "\n"))
+  }
+
+  return sections.joined(separator: "\n\n")
+}
+
+/// Recursively collect every `RecognizedTextObservation.uuid` reachable from a
+/// nested `Container` (covers `Container.text.lines` plus any tables/lists the
+/// container itself nests, e.g. a table cell containing a list).
+@available(macOS 26, *)
+private func allLineIDs(in container: DocumentObservation.Container) -> Set<UUID> {
+  var ids: Set<UUID> = []
+  for line in container.text.lines {
+    ids.insert(line.uuid)
+  }
   for table in container.tables {
     let rowCount = table.rows.count
     let colCount = table.columns.count
     for row in 0..<rowCount {
       for col in 0..<colCount {
         if let cell = table.cell(row: row, col: col) {
-          for line in cell.content.text.lines {
-            tableCellLineIDs.insert(line.uuid)
-          }
+          ids.formUnion(allLineIDs(in: cell.content))
         }
       }
     }
   }
-
-  // Keep only paragraph lines whose observation identity is NOT owned by any
-  // table cell.
-  let nonTableParagraphs: [String] = container.paragraphs.compactMap { paragraph in
-    let kept = paragraph.lines.filter { line in
-      !tableCellLineIDs.contains(line.uuid)
-    }
-    if kept.isEmpty { return nil }
-    return kept.map { $0.transcript }.joined(separator: "\n")
-  }
-  let paragraphText = nonTableParagraphs.joined(separator: "\n\n")
-  if !paragraphText.isEmpty {
-    sections.append(paragraphText)
-  }
-
-  // Tables: rendered as plain tab-separated rows
-  for table in container.tables {
-    let rendered = formatTable(table)
-    if !rendered.isEmpty {
-      sections.append(rendered)
+  for list in container.lists {
+    for item in list.items {
+      ids.formUnion(allLineIDs(in: item.content))
     }
   }
+  return ids
+}
 
-  return sections.joined(separator: "\n\n")
+@available(macOS 26, *)
+private func collectContainerLineIDs(_ ids: Set<UUID>, into sink: inout Set<UUID>) {
+  sink.formUnion(ids)
+}
+
+@available(macOS 26, *)
+extension DocumentObservation.Container.Table {
+  /// All line UUIDs owned by every cell in this table, computed once so the
+  /// caller can dedup paragraphs against the cells without a doubly-nested
+  /// loop.
+  fileprivate var cellsContainerLineIDs: Set<UUID> {
+    var ids: Set<UUID> = []
+    let rowCount = rows.count
+    let colCount = columns.count
+    for row in 0..<rowCount {
+      for col in 0..<colCount {
+        if let cell = cell(row: row, col: col) {
+          ids.formUnion(allLineIDs(in: cell.content))
+        }
+      }
+    }
+    return ids
+  }
 }
 
 @available(macOS 26, *)

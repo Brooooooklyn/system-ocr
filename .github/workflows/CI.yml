@@ -215,7 +215,8 @@ jobs:
                 fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n');
               "
             else
-              echo "::warning::No sidecar dylib for ${target}; documents API will be unavailable"
+              echo "::error::No sidecar dylib for ${target}; refusing to publish Darwin package without it"
+              exit 1
             fi
           done
         shell: bash
