@@ -333,37 +333,12 @@ jobs:
         run: pnpm napi create-npm-dirs
       - name: Move artifacts
         run: pnpm artifacts
-      - name: Place darwin sidecar dylibs
-        run: |
-          # Strictness mirrors the publish step's release detection: missing
-          # sidecar is a hard error only when this commit would actually
-          # publish a release/prerelease, so non-release pushes don't fail
-          # late because of toolchain skew in the build job.
-          msg="$(git log -1 --pretty=%B)"
-          if echo "$msg" | grep -qE "^v?[0-9]+\.[0-9]+\.[0-9]+"; then
-            strict=1
-          else
-            strict=0
-          fi
-          for target in darwin-arm64 darwin-x64; do
-            cargo_target_name="$(echo "$target" | sed -e 's/darwin-arm64/aarch64-apple-darwin/' -e 's/darwin-x64/x86_64-apple-darwin/')"
-            if [ -f "artifacts/bindings-${cargo_target_name}/librecognize_documents.dylib" ]; then
-              cp "artifacts/bindings-${cargo_target_name}/librecognize_documents.dylib" "npm/${target}/"
-              echo "Placed dylib in npm/${target}/"
-              node -e "
-                const fs = require('fs');
-                const p = 'npm/${target}/package.json';
-                const j = JSON.parse(fs.readFileSync(p, 'utf8'));
-                j.files = Array.from(new Set([...(j.files || []), 'librecognize_documents.dylib']));
-                fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n');
-              "
-            elif [ "$strict" = "1" ]; then
-              echo "::error::No sidecar dylib for ${target}; refusing to publish Darwin package without it"
-              exit 1
-            else
-              echo "::warning::No sidecar dylib for ${target}; a real release on this commit would fail"
-            fi
-          done
+      - name: Inject darwin sidecar dylibs
+        # Copies librecognize_documents.dylib into each npm/darwin-* package
+        # and adds it to that package's `files`. Missing dylib is a hard error
+        # only on release commits (the script detects this from the HEAD commit
+        # message), so non-release pushes don't fail late on toolchain skew.
+        run: node scripts/inject-darwin-sidecar.mjs
         shell: bash
       - name: List packages
         run: ls -R ./npm
