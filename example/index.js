@@ -38,6 +38,10 @@ if (!image) {
         name: 'zh',
         value: 'zh.png',
       },
+      {
+        name: 'table',
+        value: 'table.png',
+      },
     ],
   })
   imagePath = join(__dirname, choice)

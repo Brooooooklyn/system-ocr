@@ -3,6 +3,9 @@ use objc2_vision::VNRequestTextRecognitionLevel;
 
 use crate::{OcrAccuracy, OcrError};
 
+#[cfg(has_recognize_documents)]
+mod documents;
+
 impl From<OcrAccuracy> for VNRequestTextRecognitionLevel {
   fn from(value: OcrAccuracy) -> Self {
     match value {
@@ -13,6 +16,66 @@ impl From<OcrAccuracy> for VNRequestTextRecognitionLevel {
 }
 
 pub(crate) fn perform_ocr(
+  #[cfg_attr(not(has_recognize_documents), allow(unused_mut))] mut image: Either<
+    String,
+    Uint8Array,
+  >,
+  accuracy: OcrAccuracy,
+  preferred_langs: Vec<String>,
+) -> std::result::Result<(String, f32), OcrError> {
+  // Resolve the documented default once so both code paths apply the same
+  // language hint policy: callers who don't pass `preferredLangs` get
+  // `["en-US"]` as advertised in the public docs.
+  let resolved_langs = if preferred_langs.is_empty() {
+    vec!["en-US".to_string()]
+  } else {
+    preferred_langs
+  };
+
+  // On macOS 26+, prefer RecognizeDocumentsRequest for richer structured
+  // output. The structured-document recognizer accepts language hints and
+  // reports per-observation confidence (averaged in Swift), so the only
+  // option it can't honour is `OcrAccuracy::Fast` — fall through to the
+  // legacy `VNRecognizeTextRequest` path in that case.
+  #[cfg(has_recognize_documents)]
+  {
+    if matches!(accuracy, OcrAccuracy::Accurate) {
+      // SYSTEM_OCR_REQUIRE_DOCUMENTS=1 makes structured-document failures
+      // hard errors instead of silently falling through to legacy OCR. This
+      // is an internal knob for tests and CI assertions on macOS 26 runners
+      // — it lets a test prove the sidecar path was actually exercised
+      // instead of just observing that some text came back via either path.
+      let strict = std::env::var_os("SYSTEM_OCR_REQUIRE_DOCUMENTS").is_some();
+      match documents::perform_recognize_documents(&mut image, &resolved_langs) {
+        Ok((text, confidence)) => return Ok((text, confidence)),
+        Err(OcrError::DocumentsSidecarUnavailable) if strict => {
+          return Err(OcrError::DocumentsSidecarUnavailable);
+        }
+        Err(OcrError::DocumentsSidecarUnavailable) => {
+          // Expected on macOS < 26, missing sidecar dylib, or absent Swift
+          // runtime — silently fall through to the legacy path.
+        }
+        Err(err) if strict => return Err(err),
+        Err(err) => {
+          // Sidecar IS loaded but the request failed (Vision regression,
+          // unreadable image, etc.). Surface it on stderr so production
+          // bugs are observable, but still fall through so callers keep
+          // getting OCR output.
+          eprintln!(
+            "system-ocr: RecognizeDocumentsRequest failed ({err}); falling back to VNRecognizeTextRequest"
+          );
+        }
+      }
+    }
+    // If the structured-document path was skipped or failed (e.g. runtime
+    // < macOS 26, missing sidecar dylib, or absent Swift runtime), fall
+    // through to the legacy VNRecognizeTextRequest path below.
+  }
+
+  perform_ocr_legacy(image, accuracy, resolved_langs)
+}
+
+fn perform_ocr_legacy(
   mut image: Either<String, Uint8Array>,
   accuracy: OcrAccuracy,
   preferred_langs: Vec<String>,
@@ -57,14 +120,12 @@ pub(crate) fn perform_ocr(
       let request = VNRecognizeTextRequest::init(VNRecognizeTextRequest::alloc());
       request.setRecognitionLevel(accuracy.into());
 
-      let langs = if preferred_langs.is_empty() {
-        vec![NSString::from_str("en-US")]
-      } else {
-        preferred_langs
-          .iter()
-          .map(|lang| NSString::from_str(lang))
-          .collect::<Vec<Retained<NSString>>>()
-      };
+      // `preferred_langs` is guaranteed non-empty here: `perform_ocr` resolves
+      // the documented `["en-US"]` default before dispatching.
+      let langs = preferred_langs
+        .iter()
+        .map(|lang| NSString::from_str(lang))
+        .collect::<Vec<Retained<NSString>>>();
       let preferred_langs_arr: Retained<NSArray<NSString>> = NSArray::from_retained_slice(&langs);
       request.setRecognitionLanguages(&preferred_langs_arr);
       request.setUsesLanguageCorrection(true);

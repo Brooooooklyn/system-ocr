@@ -150,6 +150,7 @@ dist
 
 *.node
 *.wasm
+*.dylib
 
 ### Node Patch ###
 # Serverless Webpack directories

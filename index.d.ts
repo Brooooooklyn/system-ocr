@@ -7,7 +7,11 @@ export declare enum OcrAccuracy {
 
 export interface OcrResult {
   text: string
-  /** always 1.0 on Windows */
+  /**
+   * Always 1.0 on Windows. On macOS, the averaged per-observation confidence
+   * returned by the Vision recognizer (either `RecognizeDocumentsRequest` on
+   * macOS 26+ or the legacy `VNRecognizeTextRequest` path).
+   */
   confidence: number
 }
 
