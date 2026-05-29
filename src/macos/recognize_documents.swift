@@ -241,16 +241,32 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
   // into place naturally because their constituent line UUIDs also appear
   // in `container.text.lines`.
 
+  // Vision sometimes reports a title whose `lines` array is empty (e.g. a
+  // single styled heading that is also surfaced as a paragraph). When that
+  // happens we can't dedup the title against paragraphs by UUID, so the same
+  // text gets emitted twice (once as the orphan title block, once as the
+  // paragraph). Resolve the title's line UUIDs by matching its transcript
+  // against `container.text.lines` so the title joins the normal UUID dedup
+  // path. If nothing matches (a genuinely standalone title), the set stays
+  // empty and the existing defensive append still preserves it.
+  let titleLineIDs: Set<UUID> = {
+    guard let title = container.title else { return [] }
+    let direct = Set(title.lines.map { $0.uuid })
+    if !direct.isEmpty { return direct }
+    let titleText = title.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+    if titleText.isEmpty { return [] }
+    return Set(
+      container.text.lines
+        .filter { $0.transcript.trimmingCharacters(in: .whitespacesAndNewlines) == titleText }
+        .map { $0.uuid })
+  }()
+
   // Phase 1: pre-collect every line UUID owned by nested structures
   // (tables/lists/title) so plain paragraph emission can skip them. Doing
   // this in a separate pass keeps dedup deterministic regardless of the
   // order in which blocks happen to be rendered.
   var consumedLineIDs: Set<UUID> = []
-  if let title = container.title {
-    for line in title.lines {
-      consumedLineIDs.insert(line.uuid)
-    }
-  }
+  consumedLineIDs.formUnion(titleLineIDs)
   for table in container.tables {
     collectContainerLineIDs(table.cellsContainerLineIDs, into: &consumedLineIDs)
   }
@@ -267,7 +283,7 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
   if let title = container.title {
     let titleText = title.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
     if !titleText.isEmpty {
-      let ids = Set(title.lines.map { $0.uuid })
+      let ids = titleLineIDs
       blocks.append(DocumentBlock(text: titleText, lineIDs: ids))
     }
   }
