@@ -1,6 +1,6 @@
 {
   "name": "@napi-rs/system-ocr",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "OCR via system provided API",
   "keywords": [
     "N-API",
