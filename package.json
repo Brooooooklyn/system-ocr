@@ -47,7 +47,7 @@
   },
   "devDependencies": {
     "@inquirer/prompts": "^8.0.0",
-    "@napi-rs/cli": "3.7.2",
+    "@napi-rs/cli": "3.7.3",
     "@oxc-node/core": "^0.1.0",
     "@types/node": "^24.1.0",
     "ava": "^8.0.0",
@@ -55,7 +55,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.0.0",
     "npm-run-all2": "^9.0.0",
-    "oxfmt": "^0.58.0",
+    "oxfmt": "^0.59.0",
     "oxlint": "^1.8.0",
     "typescript": "^7.0.0"
   },
@@ -95,5 +95,5 @@
   "engines": {
     "node": ">= 10"
   },
-  "packageManager": "pnpm@11.11.0"
+  "packageManager": "pnpm@11.13.1"
 }
