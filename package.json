@@ -57,7 +57,7 @@
     "npm-run-all2": "^9.0.0",
     "oxfmt": "^0.58.0",
     "oxlint": "^1.8.0",
-    "typescript": "^6.0.0"
+    "typescript": "^7.0.0"
   },
   "lint-staged": {
     "*.@(js|ts|tsx)": [
