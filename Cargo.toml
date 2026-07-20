@@ -16,7 +16,7 @@ napi = { version = "3.0.0", default-features = false, features = ["napi3", "erro
 napi-derive = "3.0.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-file_type = "0.8"
+file_type = "0.9"
 futures = "0.3"
 windows = { version = "0.62.0", features = [
   "Foundation_Collections",
