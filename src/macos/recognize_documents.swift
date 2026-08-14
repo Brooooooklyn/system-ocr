@@ -393,32 +393,15 @@ private func formatDocument(_ container: DocumentObservation.Container) -> Strin
   return sections.joined(separator: "\n\n")
 }
 
-/// Recursively collect every `RecognizedTextObservation.uuid` reachable from a
-/// nested `Container` (covers `Container.text.lines` plus any tables/lists the
-/// container itself nests, e.g. a table cell containing a list).
+/// Collect every `RecognizedTextObservation.uuid` owned by a nested container.
+///
+/// `Container.text.lines` is already the flattened text surface for that
+/// container. Do not recurse through `tables` or `lists` here: Vision can
+/// expose an item's owning list again through `item.content.lists`, so treating
+/// the structure as an acyclic tree causes unbounded recursion.
 @available(macOS 26, *)
 private func allLineIDs(in container: DocumentObservation.Container) -> Set<UUID> {
-  var ids: Set<UUID> = []
-  for line in container.text.lines {
-    ids.insert(line.uuid)
-  }
-  for table in container.tables {
-    let rowCount = table.rows.count
-    let colCount = table.columns.count
-    for row in 0..<rowCount {
-      for col in 0..<colCount {
-        if let cell = table.cell(row: row, col: col) {
-          ids.formUnion(allLineIDs(in: cell.content))
-        }
-      }
-    }
-  }
-  for list in container.lists {
-    for item in list.items {
-      ids.formUnion(allLineIDs(in: item.content))
-    }
-  }
-  return ids
+  Set(container.text.lines.map { $0.uuid })
 }
 
 @available(macOS 26, *)
