@@ -5,8 +5,9 @@ use std::ptr;
 use std::sync::LazyLock;
 
 use napi::bindgen_prelude::{Either, Uint8Array};
+use serde::Deserialize;
 
-use crate::OcrError;
+use crate::{OcrError, OcrLine, OcrOutput, normalized_bounding_box};
 
 // `dlopen` flags. Defined inline so we don't pull in `libc`.
 const RTLD_NOW: c_int = 2;
@@ -15,12 +16,10 @@ const RTLD_LOCAL: c_int = 4;
 // Expected ABI version exported by the Swift sidecar. Must match the value
 // returned by `recognize_documents_abi_version` in
 // `src/macos/recognize_documents.swift`. BUMP whenever any of the
-// operational `@_cdecl` signatures (`recognize_documents_from_path`,
-// `recognize_documents_from_data`, `free_recognize_result`) change and pair
-// every bump with a matching bump of the Swift function's return value. If
-// the values disagree at runtime, `load_bridge` refuses to use the sidecar
-// (and the caller falls through to the legacy path in non-strict mode).
-const EXPECTED_ABI_VERSION: u32 = 1;
+// operational signatures or the returned payload schema change and pair every
+// bump with a matching bump in the Swift sidecar. If the values disagree at
+// runtime, `load_bridge` refuses to use the sidecar and falls back to legacy.
+const EXPECTED_ABI_VERSION: u32 = 2;
 
 unsafe extern "C" {
   fn dlopen(filename: *const c_char, flag: c_int) -> *mut c_void;
@@ -37,10 +36,10 @@ struct DlInfo {
   dli_saddr: *mut c_void,
 }
 
-// New ABI: each entry point takes OUT pointers for the aggregated confidence
-// and an error string, and returns either a non-NULL malloc'd C-string on
-// success (empty string means "no text recognized") or NULL on failure, in
-// which case `*error_out` will point to a malloc'd error description. The
+// Each entry point takes OUT pointers for the aggregated confidence and an
+// error string, and returns either a non-NULL malloc'd C-string containing the
+// JSON result payload on success or NULL on failure, in which case
+// `*error_out` will point to a malloc'd error description. The
 // Swift bridge initialises `*confidence_out` to `0.0` at entry, so error paths
 // never leave uninitialised memory visible to Rust.
 type FromPathFn = unsafe extern "C" fn(
@@ -63,6 +62,29 @@ struct Bridge {
   from_path: FromPathFn,
   from_data: FromDataFn,
   free: FreeFn,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DocumentsPayload {
+  text: String,
+  lines: Vec<DocumentsLine>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DocumentsLine {
+  text: String,
+  confidence: f64,
+  bounding_box: DocumentsBoundingBox,
+}
+
+#[derive(Deserialize)]
+struct DocumentsBoundingBox {
+  x: f64,
+  y: f64,
+  width: f64,
+  height: f64,
 }
 
 // SAFETY: `Bridge` only holds function pointers that are valid for the
@@ -242,7 +264,7 @@ fn sidecar_path() -> Option<PathBuf> {
 pub(crate) fn perform_recognize_documents(
   image: &mut Either<String, Uint8Array>,
   preferred_langs: &[String],
-) -> std::result::Result<(String, f32), OcrError> {
+) -> std::result::Result<OcrOutput, OcrError> {
   let bridge = BRIDGE
     .as_ref()
     .ok_or(OcrError::DocumentsSidecarUnavailable)?;
@@ -299,8 +321,8 @@ pub(crate) fn perform_recognize_documents(
     return Err(OcrError::ErrorWithDesc(msg));
   }
 
-  // Success path: take ownership of the text, then free it.
-  let text = unsafe {
+  // Success path: take ownership of the JSON payload, then free it.
+  let payload_json = unsafe {
     let s = CStr::from_ptr(raw_ptr).to_string_lossy().into_owned();
     (bridge.free)(raw_ptr);
     s
@@ -312,9 +334,31 @@ pub(crate) fn perform_recognize_documents(
     unsafe { (bridge.free)(error_ptr) };
   }
 
-  if text.trim().is_empty() {
+  let payload: DocumentsPayload = serde_json::from_str(&payload_json)
+    .map_err(|err| OcrError::ErrorWithDesc(format!("Invalid documents sidecar payload: {err}")))?;
+
+  if payload.text.trim().is_empty() {
     return Err(OcrError::NoTextRecognized);
   }
 
-  Ok((text, confidence))
+  let lines = payload
+    .lines
+    .into_iter()
+    .filter_map(|line| {
+      let bbox = line.bounding_box;
+      normalized_bounding_box(bbox.x, bbox.y, bbox.x + bbox.width, bbox.y + bbox.height).map(
+        |bounding_box| OcrLine {
+          text: line.text,
+          confidence: line.confidence,
+          bounding_box,
+        },
+      )
+    })
+    .collect();
+
+  Ok(OcrOutput {
+    text: payload.text,
+    confidence: confidence as f64,
+    lines,
+  })
 }

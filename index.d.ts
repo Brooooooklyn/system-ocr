@@ -5,6 +5,25 @@ export declare enum OcrAccuracy {
   Accurate = 1
 }
 
+export interface OcrBoundingBox {
+  /** Horizontal position relative to the input image, normalized to `0.0..=1.0`. */
+  x: number
+  /** Vertical position from the top of the input image, normalized to `0.0..=1.0`. */
+  y: number
+  /** Width relative to the input image, normalized to `0.0..=1.0`. */
+  width: number
+  /** Height relative to the input image, normalized to `0.0..=1.0`. */
+  height: number
+}
+
+export interface OcrLine {
+  text: string
+  /** Always 1.0 on Windows. */
+  confidence: number
+  /** Axis-aligned line bounds in normalized, top-left-origin image coordinates. */
+  boundingBox: OcrBoundingBox
+}
+
 export interface OcrResult {
   text: string
   /**
@@ -13,6 +32,11 @@ export interface OcrResult {
    * macOS 26+ or the legacy `VNRecognizeTextRequest` path).
    */
   confidence: number
+  /**
+   * Recognized lines in reading order. The formatted `text` is not guaranteed
+   * to equal these lines joined together.
+   */
+  lines: Array<OcrLine>
 }
 
 /**

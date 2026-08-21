@@ -10,17 +10,17 @@ import Vision
 // match what it was compiled against (stale dylib left over from a partial
 // upgrade, cache restore, manual bundle, etc.). BUMP whenever any other
 // `@_cdecl` in this file changes signature (parameter count, parameter
-// types, return type). Pair every bump with a matching bump of
-// `EXPECTED_ABI_VERSION` in `src/macos/documents.rs`.
+// types, return type) or the success payload schema changes. Pair every bump
+// with a matching bump of `EXPECTED_ABI_VERSION` in
+// `src/macos/documents.rs`.
 @_cdecl("recognize_documents_abi_version")
 public func recognizeDocumentsAbiVersion() -> UInt32 {
-  return 1
+  return 2
 }
 
 // ABI contract (shared by both `from_path` and `from_data` variants):
-//   - Returns a non-NULL malloc'd C-string on success (the OCR text).
-//     - An empty string signals "no text recognized"; callers should treat
-//       it as a soft failure.
+//   - Returns a non-NULL malloc'd C-string on success containing a JSON
+//     object with the formatted OCR text and normalized line boxes.
 //     - `errorOut` is set to NULL on success.
 //   - Returns NULL on failure. `errorOut` is set to a freshly-allocated
 //     C-string with the error description. Callers MUST free both the
@@ -68,7 +68,7 @@ public func recognizeDocumentsFromPath(
       applyDocumentOptions(&request)
       let observations = try await request.perform(on: url)
       confidence = averageConfidence(observations)
-      resultPtr = makeCString(formatObservations(observations))
+      resultPtr = makeCString(try encodeRecognitionPayload(observations))
     } catch {
       errorPtr = makeCString(error.localizedDescription)
     }
@@ -123,7 +123,7 @@ public func recognizeDocumentsFromData(
       applyDocumentOptions(&request)
       let observations = try await request.perform(on: data)
       confidence = averageConfidence(observations)
-      resultPtr = makeCString(formatObservations(observations))
+      resultPtr = makeCString(try encodeRecognitionPayload(observations))
     } catch {
       errorPtr = makeCString(error.localizedDescription)
     }
@@ -202,6 +202,51 @@ private func averageConfidence(_ observations: [DocumentObservation]) -> Float {
   }
   guard count > 0 else { return 0.0 }
   return total / Float(count)
+}
+
+// MARK: - Line layout payload
+
+private struct RecognitionPayload: Encodable {
+  let text: String
+  let lines: [RecognitionLine]
+}
+
+private struct RecognitionLine: Encodable {
+  let text: String
+  let confidence: Float
+  let boundingBox: RecognitionBoundingBox
+}
+
+private struct RecognitionBoundingBox: Encodable {
+  let x: Double
+  let y: Double
+  let width: Double
+  let height: Double
+}
+
+@available(macOS 26, *)
+private func encodeRecognitionPayload(_ observations: [DocumentObservation]) throws -> String {
+  let lines = observations.flatMap { observation in
+    observation.document.text.lines.compactMap { line -> RecognitionLine? in
+      guard !line.transcript.isEmpty else { return nil }
+
+      let box = line.boundingBox
+      return RecognitionLine(
+        text: line.transcript,
+        confidence: line.confidence,
+        boundingBox: RecognitionBoundingBox(
+          x: Double(box.origin.x),
+          y: Double(1.0 - box.origin.y - box.height),
+          width: Double(box.width),
+          height: Double(box.height)
+        )
+      )
+    }
+  }
+
+  let payload = RecognitionPayload(text: formatObservations(observations), lines: lines)
+  let data = try JSONEncoder().encode(payload)
+  return String(decoding: data, as: UTF8.self)
 }
 
 // MARK: - Formatting

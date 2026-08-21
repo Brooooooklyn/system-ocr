@@ -31,7 +31,17 @@ npm install @napi-rs/system-ocr
 import { recognize } from '@napi-rs/system-ocr'
 
 const result = await recognize('path/to/image.png')
+
+for (const line of result.lines) {
+  console.log(line.text, line.confidence, line.boundingBox)
+}
 ```
+
+`result.lines` follows the system OCR engine's reading order. Each bounding box
+uses normalized input-image coordinates (`0` to `1`) with its origin at the
+top-left. The formatted `result.text` is preserved for compatibility and is not
+guaranteed to equal the line texts joined together. Line confidence is `1.0` on
+Windows, matching the existing result confidence convention.
 
 ```ts
 import { recognize, OcrAccuracy } from '@napi-rs/system-ocr'
