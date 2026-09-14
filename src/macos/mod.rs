@@ -1,7 +1,7 @@
 use napi::bindgen_prelude::{Either, Uint8Array};
 use objc2_vision::VNRequestTextRecognitionLevel;
 
-use crate::{OcrAccuracy, OcrError};
+use crate::{OcrAccuracy, OcrError, OcrLine, OcrOutput, normalized_bounding_box};
 
 #[cfg(has_recognize_documents)]
 mod documents;
@@ -22,7 +22,7 @@ pub(crate) fn perform_ocr(
   >,
   accuracy: OcrAccuracy,
   preferred_langs: Vec<String>,
-) -> std::result::Result<(String, f32), OcrError> {
+) -> std::result::Result<OcrOutput, OcrError> {
   // Resolve the documented default once so both code paths apply the same
   // language hint policy: callers who don't pass `preferredLangs` get
   // `["en-US"]` as advertised in the public docs.
@@ -47,7 +47,7 @@ pub(crate) fn perform_ocr(
       // instead of just observing that some text came back via either path.
       let strict = std::env::var_os("SYSTEM_OCR_REQUIRE_DOCUMENTS").is_some();
       match documents::perform_recognize_documents(&mut image, &resolved_langs) {
-        Ok((text, confidence)) => return Ok((text, confidence)),
+        Ok(output) => return Ok(output),
         Err(OcrError::DocumentsSidecarUnavailable) if strict => {
           return Err(OcrError::DocumentsSidecarUnavailable);
         }
@@ -79,7 +79,7 @@ fn perform_ocr_legacy(
   mut image: Either<String, Uint8Array>,
   accuracy: OcrAccuracy,
   preferred_langs: Vec<String>,
-) -> std::result::Result<(String, f32), OcrError> {
+) -> std::result::Result<OcrOutput, OcrError> {
   use objc2::{
     AnyThread,
     rc::{Retained, autoreleasepool},
@@ -144,6 +144,7 @@ fn perform_ocr_legacy(
         let mut collected_text = String::new();
         let mut total_conf = 0.0f32;
         let mut used = 0usize;
+        let mut lines = Vec::new();
 
         for result in results {
           // Fetch up to 5 candidates and pick the first that satisfies the confidence threshold
@@ -168,6 +169,7 @@ fn perform_ocr_legacy(
 
           let rust_string = first_candidate.string();
           let rust_str = rust_string.to_str(pool);
+          let confidence = first_candidate.confidence();
           // Determine whether to insert space or newline depending on bounding box.
           let bbox: CGRect = result.boundingBox();
           if !rust_str.is_empty() {
@@ -179,8 +181,20 @@ fn perform_ocr_legacy(
               }
             }
             collected_text.push_str(rust_str);
+
+            let left = bbox.origin.x;
+            let top = 1.0 - bbox.origin.y - bbox.size.height;
+            if let Some(bounding_box) =
+              normalized_bounding_box(left, top, left + bbox.size.width, top + bbox.size.height)
+            {
+              lines.push(OcrLine {
+                text: rust_str.to_string(),
+                confidence: confidence as f64,
+                bounding_box,
+              });
+            }
           }
-          total_conf += first_candidate.confidence();
+          total_conf += confidence;
           used += 1;
         }
 
@@ -189,7 +203,11 @@ fn perform_ocr_legacy(
         } else {
           0.0
         };
-        return Ok((collected_text, avg_conf));
+        return Ok(OcrOutput {
+          text: collected_text,
+          confidence: avg_conf as f64,
+          lines,
+        });
       }
       Err(OcrError::NoTextRecognized)
     })

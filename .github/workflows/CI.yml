@@ -51,6 +51,9 @@ jobs:
       - name: Clippy
         run: cargo clippy
 
+      - name: Cargo test
+        run: cargo test
+
   build:
     strategy:
       fail-fast: false
@@ -296,7 +299,14 @@ jobs:
                 console.error('Sidecar returned suspiciously short text:', JSON.stringify(r));
                 process.exit(1);
               }
-              console.log('Sidecar smoke OK:', r.text.length, 'chars at', r.confidence.toFixed(3), 'confidence');
+              if (!Array.isArray(r.lines) || r.lines.length === 0 || r.lines.some(line => {
+                const box = line.boundingBox;
+                return !line.text || !box || box.x < 0 || box.y < 0 || box.width <= 0 || box.height <= 0 || box.x + box.width > 1 || box.y + box.height > 1;
+              })) {
+                console.error('Sidecar returned invalid line layout:', JSON.stringify(r));
+                process.exit(1);
+              }
+              console.log('Sidecar smoke OK:', r.text.length, 'chars in', r.lines.length, 'lines at', r.confidence.toFixed(3), 'confidence');
             }, e => {
               console.error('Sidecar smoke FAILED:', e.message);
               process.exit(1);

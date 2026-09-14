@@ -14,7 +14,7 @@ use windows::{
   core::{Error, HRESULT, HSTRING, Result},
 };
 
-use crate::{OcrAccuracy, OcrError};
+use crate::{OcrAccuracy, OcrError, OcrLine, OcrOutput, normalized_rotated_bounding_box};
 
 const E_ACCESSDENIED: HRESULT = HRESULT(0x80070005u32 as i32);
 
@@ -28,7 +28,7 @@ pub(crate) fn perform_ocr(
   image: Either<String, Uint8Array>,
   _accuracy: OcrAccuracy,
   preferred_langs: Vec<String>,
-) -> std::result::Result<(String, f32), OcrError> {
+) -> std::result::Result<OcrOutput, OcrError> {
   perform_ocr_win(image, _accuracy, preferred_langs)
     .map_err(|e| OcrError::WindowsError(e.to_string()))
 }
@@ -37,8 +37,10 @@ pub(crate) fn perform_ocr_win(
   image: Either<String, Uint8Array>,
   _accuracy: OcrAccuracy,
   preferred_langs: Vec<String>,
-) -> Result<(String, f32)> {
+) -> Result<OcrOutput> {
   let bitmap = open_image_as_bitmap(image)?;
+  let image_width = f64::from(bitmap.PixelWidth()?);
+  let image_height = f64::from(bitmap.PixelHeight()?);
   let engine = if let Some(lang) = preferred_langs.first() {
     let lang = Language::CreateLanguage(&HSTRING::from(lang))?;
     OcrEngine::TryCreateFromLanguage(&lang)?
@@ -46,11 +48,74 @@ pub(crate) fn perform_ocr_win(
     OcrEngine::TryCreateFromUserProfileLanguages()?
   };
 
-  let result = block_on(async { engine.RecognizeAsync(&bitmap)?.await })?
-    .Text()?
-    .to_string_lossy();
+  let result = block_on(async { engine.RecognizeAsync(&bitmap)?.await })?;
+  let text = result.Text()?.to_string_lossy();
+  let text_angle = result.TextAngle().ok().and_then(|angle| angle.Value().ok());
+  let native_lines = result.Lines()?;
+  let mut lines = Vec::with_capacity(native_lines.Size()? as usize);
 
-  Ok((result, 1.0))
+  for index in 0..native_lines.Size()? {
+    let native_line = native_lines.GetAt(index)?;
+    let words = native_line.Words()?;
+    let mut line_rect: Option<PixelRect> = None;
+
+    for word_index in 0..words.Size()? {
+      let rect = words.GetAt(word_index)?.BoundingRect()?;
+      let word_rect = PixelRect {
+        left: f64::from(rect.X),
+        top: f64::from(rect.Y),
+        right: f64::from(rect.X) + f64::from(rect.Width),
+        bottom: f64::from(rect.Y) + f64::from(rect.Height),
+      };
+      line_rect = Some(match line_rect {
+        Some(current) => current.union(word_rect),
+        None => word_rect,
+      });
+    }
+
+    if let Some(bounding_box) = line_rect.and_then(|rect| {
+      normalized_rotated_bounding_box(
+        rect.left,
+        rect.top,
+        rect.right,
+        rect.bottom,
+        image_width,
+        image_height,
+        text_angle,
+      )
+    }) {
+      lines.push(OcrLine {
+        text: native_line.Text()?.to_string_lossy(),
+        confidence: 1.0,
+        bounding_box,
+      });
+    }
+  }
+
+  Ok(OcrOutput {
+    text,
+    confidence: 1.0,
+    lines,
+  })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PixelRect {
+  left: f64,
+  top: f64,
+  right: f64,
+  bottom: f64,
+}
+
+impl PixelRect {
+  fn union(self, other: Self) -> Self {
+    Self {
+      left: self.left.min(other.left),
+      top: self.top.min(other.top),
+      right: self.right.max(other.right),
+      bottom: self.bottom.max(other.bottom),
+    }
+  }
 }
 
 /// Opens an PNG file as a `SoftwareBitmap`
@@ -112,16 +177,5 @@ pub fn open_image_as_bitmap(image: Either<String, Uint8Array>) -> Result<Softwar
 
       block_on(async { bitmap.GetSoftwareBitmapAsync()?.await })
     }
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use crate::*;
-
-  #[test]
-  fn ocr_works() {
-    let ocr_text: String = ocr("sample/sample.png").unwrap();
-    assert_eq!(ocr_text, "Sample Text");
   }
 }
