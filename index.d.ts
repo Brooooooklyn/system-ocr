@@ -17,6 +17,7 @@ export interface OcrBoundingBox {
 }
 
 export interface OcrLine {
+  /** Recognized text content of the line. */
   text: string
   /** Always 1.0 on Windows. */
   confidence: number

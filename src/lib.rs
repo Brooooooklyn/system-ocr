@@ -34,6 +34,7 @@ pub struct OcrBoundingBox {
 #[napi(object)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct OcrLine {
+  /// Recognized text content of the line.
   pub text: String,
   /// Always 1.0 on Windows.
   pub confidence: f64,
