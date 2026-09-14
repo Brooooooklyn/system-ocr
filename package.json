@@ -55,7 +55,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.0.0",
     "npm-run-all2": "^9.0.0",
-    "oxfmt": "^0.67.0",
+    "oxfmt": "^0.68.0",
     "oxlint": "^1.8.0",
     "typescript": "^7.0.0"
   },
