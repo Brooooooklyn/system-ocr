@@ -47,7 +47,7 @@
   },
   "devDependencies": {
     "@inquirer/prompts": "^8.0.0",
-    "@napi-rs/cli": "3.9.1",
+    "@napi-rs/cli": "3.10.0",
     "@oxc-node/core": "^0.1.0",
     "@types/node": "^24.1.0",
     "ava": "^8.0.0",
@@ -95,5 +95,5 @@
   "engines": {
     "node": ">= 10"
   },
-  "packageManager": "pnpm@12.4.1"
+  "packageManager": "pnpm@12.4.2"
 }
