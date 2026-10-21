@@ -48,7 +48,7 @@
   "devDependencies": {
     "@inquirer/prompts": "^8.0.0",
     "@napi-rs/cli": "3.10.8",
-    "@oxc-node/core": "^0.1.0",
+    "@oxc-node/core": "^1.0.0",
     "@types/node": "^24.1.0",
     "ava": "^8.0.0",
     "chalk": "^6.0.0",
